@@ -1,0 +1,23 @@
+# run artifacts
+*.log
+archsetup.log
+
+# python
+__pycache__/
+*.pyc
+
+# backups
+*.bak
+*.orig
+
+# nix build outputs
+result
+result-*
+.direnv/
+
+# home-manager answers produced during an install (host specific, may hold layout)
+/archsetup-answers.json
+
+# editor / OS cruft
+.DS_Store
+*.swp

@@ -1,0 +1,7 @@
+# These run on Linux (the Arch ISO / installed system) - always store and check
+# out with LF endings, even when edited on Windows.
+*.py   text eol=lf
+*.sh   text eol=lf
+*.nix  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
