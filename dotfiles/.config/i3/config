@@ -211,7 +211,7 @@ bindsym $mod+r mode "resize"
 exec_always --no-startup-id picom --config $HOME/.config/picom/picom.conf -b 
 
 # Polybar Launch Script
-# exec_always --no-startup-id $HOME/.config/polybar/launch.sh --shades
+# exec_always --no-startup-id $HOME/.config/polybar/shades/launch.sh
 
 exec_always --no-startup-id $HOME/.config/i3/script/theme_init.sh --my_collection
 

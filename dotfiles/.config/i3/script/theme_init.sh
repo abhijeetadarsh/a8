@@ -17,10 +17,10 @@ case "$1" in
 esac
 
 # Generate colors with Python script 
-python "$HOME/.config/polybar/theme_engine/main.py" "$WALLPAPER_PATH" -o "$HOME/.config/polybar/shades/color"
+python "$HOME/.config/polybar/shades/theme_engine/main.py" "$WALLPAPER_PATH" -o "$HOME/.config/polybar/shades/color"
 
 # Set the wallpaper
 feh --bg-scale "$WALLPAPER_PATH"
 
 # Launch the Polybar shades
-"$HOME/.config/polybar/launch.sh"
+"$HOME/.config/polybar/shades/launch.sh"

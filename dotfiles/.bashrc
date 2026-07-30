@@ -6,7 +6,7 @@
 [[ $- != *i* ]] && return
 
 # alias ls='ls --color=auto'
-alias ls='exa --icons'
+alias ls='eza --icons'
 alias grep='grep --color=auto'
 PS1='[\u@\h \W]\$ '
 
@@ -39,4 +39,4 @@ j() {
 }
 
 complete -o dirnames -C '__jump_hint' j
-export PATH="/home/bird/tools/cp_utility/bin:$PATH"
+export PATH="$HOME/tools/cp_utility/bin:$PATH"

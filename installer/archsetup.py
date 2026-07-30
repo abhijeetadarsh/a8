@@ -4,10 +4,8 @@ archsetup.py - an interactive, nothing-hardcoded Arch Linux installer.
 
 This installs only the SYSTEM layer of Arch: partitions, base + kernel +
 firmware + microcode, locale, users, bootloader, initramfs, GPU drivers and
-networking. It does NOT install a desktop, apps or dotfiles - those are managed
-declaratively with Nix / home-manager after the first boot. The installer sets
-up Nix (daemon + flakes) and drops a starter ~/.config/home-manager you edit
-and apply with `home-manager switch`.
+networking. It does NOT install a desktop, apps or dotfiles - that is the job of
+installer/postinstall.sh, which you run as your user after the first boot.
 
 Run this from the Arch ISO live environment (python ships on the ISO):
 
@@ -1030,9 +1028,9 @@ def step_bootloader() -> None:
 
 def step_graphics() -> None:
     # This installer only lays down the system layer. The desktop, apps and
-    # dotfiles are managed declaratively with home-manager (Nix) after reboot,
-    # so nothing graphical is chosen here except the kernel-level GPU driver -
-    # the one thing Nix on Arch cannot install for you.
+    # dotfiles are installed by postinstall.sh after the reboot, so nothing
+    # graphical is chosen here except the kernel-level GPU driver - that one has
+    # to be in the initramfs/boot path, so it cannot wait for postinstall.
     CFG.update({"desktop": "none", "display_manager": "none", "terminal": "none",
                 "file_manager": "none", "browser": "none", "wm_starter_config": False,
                 "editor": "nano", "shell": "bash", "utility_groups": [],
@@ -1067,20 +1065,6 @@ def step_graphics() -> None:
     ], default=default_gpu))
 
 
-def step_userenv() -> None:
-    header("user environment (Nix / home-manager)")
-
-    info("packages, dotfiles and your window manager are managed with home-manager")
-    info("after reboot - this only seeds a starter ~/.config/home-manager you then edit")
-
-    answer("nix_wm", lambda: ask_choice(
-        "seed the home-manager config with which starter window manager?", [
-            ("sway", "sway - Wayland tiling WM (works straight from a tty, no X server)"),
-            ("hyprland", "hyprland - Wayland compositor with animations"),
-            ("none", "none - just packages + dotfiles, add a WM yourself"),
-        ], default="sway"))
-
-
 # ----------------------------------------------------------------------------
 # package list + summary
 # ----------------------------------------------------------------------------
@@ -1113,9 +1097,9 @@ def build_package_list() -> list[str]:
     elif CFG["bootloader"] == "refind":
         pkgs.append("refind")
 
-    # Nix + the handful of tools needed to bootstrap home-manager on first boot.
-    # Everything else (apps, WM, dotfiles) is installed later from home.nix.
-    pkgs += ["nix", "git", "curl"]
+    # Just enough to get online and clone this repo on first boot; everything
+    # else (desktop, apps, dotfiles) is installed by postinstall.sh.
+    pkgs += ["git", "curl"]
 
     gpu = CFG.get("gpu_driver", "none")
     pkgs += GPU_PACKAGES.get(gpu, ["mesa"])
@@ -1178,8 +1162,7 @@ def summary_and_confirm() -> None:
     say(f"  {C.B}bootloader{C.R}     : {CFG['bootloader']}"
         f"{'  (os-prober enabled)' if CFG.get('os_prober') else ''}")
     say(f"  {C.B}gpu driver{C.R}     : {CFG.get('gpu_driver', 'none')}")
-    say(f"  {C.B}user env{C.R}       : nix + home-manager"
-        f"    starter wm: {CFG.get('nix_wm', 'none')}")
+    say(f"  {C.B}user env{C.R}       : none - run installer/postinstall.sh after reboot")
 
     pkgs = build_package_list()
     say()
@@ -1440,7 +1423,7 @@ def configure_locale_time() -> None:
                  "::1\t\tlocalhost\n"
                  f"127.0.1.1\t{host}.localdomain\t{host}\n")
 
-    # the graphical session (installed later via home-manager) still wants a layout
+    # the graphical session (installed later by postinstall.sh) still wants a layout
     write_target("/etc/X11/xorg.conf.d/00-keyboard.conf",
                  'Section "InputClass"\n'
                  '    Identifier "system-keyboard"\n'
@@ -1642,8 +1625,7 @@ def install_bootloader() -> None:
 def configure_services() -> None:
     header("services")
 
-    services = ["NetworkManager.service", "systemd-timesyncd.service", "fstrim.timer",
-                "nix-daemon.socket"]
+    services = ["NetworkManager.service", "systemd-timesyncd.service", "fstrim.timer"]
     groups = CFG.get("utility_groups", [])
 
     if "bluetooth" in groups:
@@ -1719,153 +1701,6 @@ def configure_extras() -> None:
 
 
 # ----------------------------------------------------------------------------
-# step 9 - nix / home-manager
-# ----------------------------------------------------------------------------
-
-def configure_nix() -> None:
-    header("nix package manager")
-
-    write_target("/etc/nix/nix.conf",
-                 "# managed by archsetup - Nix drives your user environment\n"
-                 "experimental-features = nix-command flakes\n"
-                 "trusted-users = root @wheel\n"
-                 "auto-optimise-store = true\n")
-
-    # make sure the nixbld build users and the nix-users group exist, then let
-    # our user talk to the daemon without sudo
-    chroot_run("systemd-sysusers", check=False, quiet=True)
-    chroot_run(f"gpasswd -a {shlex.quote(CFG['username'])} nix-users",
-               check=False, quiet=True)
-    ok("nix configured (daemon socket enabled, flakes on, user in nix-users)")
-
-
-FLAKE_NIX = """{
-  description = "@USER@ home-manager configuration";
-
-  inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    home-manager = {
-      url = "github:nix-community/home-manager";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-  };
-
-  outputs = { nixpkgs, home-manager, ... }:
-    let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
-    in {
-      homeConfigurations."@USER@" = home-manager.lib.homeManagerConfiguration {
-        inherit pkgs;
-        modules = [ ./home.nix ];
-      };
-    };
-}
-"""
-
-HOME_NIX = """{ config, pkgs, ... }:
-
-{
-  # This file is yours now - edit it, then apply with:
-  #   home-manager switch --flake ~/.config/home-manager#@USER@   (aliased to `hm`)
-  home.username = "@USER@";
-  home.homeDirectory = "/home/@USER@";
-
-  # Keep this matching your home-manager release; do not bump it casually.
-  home.stateVersion = "25.05";
-
-  programs.home-manager.enable = true;
-
-  # ---- packages installed into your user profile ---------------------------
-  home.packages = with pkgs; [
-@PKGS@  ];
-
-  fonts.fontconfig.enable = true;
-
-  programs.neovim = {
-    enable = true;
-    defaultEditor = true;
-    viAlias = true;
-    vimAlias = true;
-  };
-
-  programs.bash = {
-    enable = true;
-    shellAliases = {
-      ll = "ls -lah";
-      update = "sudo pacman -Syu";  # system packages still come from pacman
-      hm = "home-manager switch --flake ~/.config/home-manager#@USER@";
-    };
-  };
-
-@WMBLOCK@}
-"""
-
-_BASE_PKGS = ["git", "curl", "wget", "ripgrep", "fd", "fzf", "jq", "tree",
-              "htop", "btop", "unzip", "firefox", "noto-fonts", "noto-fonts-emoji"]
-
-_WM_PKGS = {
-    "sway": ["foot", "wofi", "waybar", "mako", "grim", "slurp", "wl-clipboard",
-             "pamixer", "brightnessctl", "playerctl"],
-    "hyprland": ["foot", "wofi", "waybar", "mako", "grim", "slurp", "wl-clipboard",
-                 "hyprpaper", "pamixer", "brightnessctl", "playerctl"],
-    "none": [],
-}
-
-_WM_BLOCK = {
-    "sway": (
-        "  # window manager: sway (Wayland) - launch from a tty with `sway`\n"
-        "  wayland.windowManager.sway = {\n"
-        "    enable = true;\n"
-        "    config = rec {\n"
-        '      modifier = "Mod4";\n'
-        '      terminal = "foot";\n'
-        '      menu = "wofi --show drun";\n'
-        "    };\n"
-        "  };\n"
-    ),
-    "hyprland": (
-        "  # window manager: hyprland (Wayland) - launch from a tty with `Hyprland`\n"
-        "  wayland.windowManager.hyprland.enable = true;\n"
-    ),
-    "none": "",
-}
-
-
-def render_home_nix(user: str, wm: str) -> str:
-    pkgs = _BASE_PKGS + _WM_PKGS.get(wm, [])
-    # emit the package list four wide so the file stays readable
-    lines, row = [], []
-    for p in pkgs:
-        row.append(p)
-        if len(row) == 4:
-            lines.append("    " + " ".join(row))
-            row = []
-    if row:
-        lines.append("    " + " ".join(row))
-    pkg_text = "\n".join(lines) + "\n"
-
-    return (HOME_NIX
-            .replace("@PKGS@", pkg_text)
-            .replace("@WMBLOCK@", _WM_BLOCK.get(wm, ""))
-            .replace("@USER@", user))
-
-
-def write_nix_config() -> None:
-    header("home-manager starter config")
-
-    user = CFG["username"]
-    wm = CFG.get("nix_wm", "sway")
-    cfgdir = f"/home/{user}/.config/home-manager"
-
-    write_target(f"{cfgdir}/flake.nix", FLAKE_NIX.replace("@USER@", user))
-    write_target(f"{cfgdir}/home.nix", render_home_nix(user, wm))
-    chroot_run(f"chown -R {user}:{user} /home/{user}/.config", check=False)
-
-    ok(f"wrote {cfgdir}/{{flake.nix,home.nix}} (starter wm: {wm})")
-
-
-# ----------------------------------------------------------------------------
 # finish
 # ----------------------------------------------------------------------------
 
@@ -1883,26 +1718,18 @@ def finish() -> None:
     ok(f"Arch Linux is installed on {CFG['part_root']}")
     say()
     user = CFG["username"]
-    wm = CFG.get("nix_wm", "sway")
     say(f"  user       : {user}")
     say(f"  hostname   : {CFG['hostname']}")
     say(f"  bootloader : {CFG['bootloader']}")
-    say(f"  user env   : nix + home-manager   (starter wm: {wm})")
+    say("  user env   : none yet - installer/postinstall.sh builds it")
     say()
     say(f"{C.B}after the reboot:{C.R}")
     say(f"  - log in as {user} on a tty, then get online:  nmtui")
-    say("  - build your user environment (first run downloads a lot - be patient):")
-    say(f"      nix run home-manager/master -- switch --flake ~/.config/home-manager#{user}")
-    say("  - from then on just:  hm      (alias for `home-manager switch --flake ...`)")
-    if wm == "sway":
-        say("  - start the desktop:  sway")
-        if CFG.get("gpu_driver", "").startswith("nvidia"):
-            say("      (nvidia: if sway won't start, try `sway --unsupported-gpu`;")
-            say("       the intel iGPU normally drives the built-in display fine)")
-    elif wm == "hyprland":
-        say("  - start the desktop:  Hyprland")
-    say("  - add/remove apps and tweak your WM in ~/.config/home-manager/home.nix")
-    say("  - system packages (kernel, drivers) still come from pacman:  sudo pacman -Syu")
+    say("  - clone this repo and build your desktop:")
+    say("      git clone <this-repo> ~/arch-setup")
+    say("      ~/arch-setup/installer/postinstall.sh")
+    say("  - start the desktop:  startx")
+    say("  - update later with:  sudo pacman -Syu")
     if CFG.get("os_prober"):
         say("  - Windows missing from the menu? `sudo grub-mkconfig -o /boot/grub/grub.cfg`")
     say("  - this run is recorded in /root/archsetup.log inside the new system")
@@ -1960,7 +1787,6 @@ def main() -> None:
     step_system()
     step_bootloader()
     step_graphics()
-    step_userenv()
 
     summary_and_confirm()
 
@@ -1977,8 +1803,6 @@ def main() -> None:
     install_bootloader()
     configure_services()
     configure_extras()
-    configure_nix()
-    write_nix_config()
 
     finish()
 

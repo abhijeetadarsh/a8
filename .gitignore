@@ -10,17 +10,9 @@ __pycache__/
 *.bak
 *.orig
 
-# nix build outputs
-result
-result-*
-.direnv/
-
-# home-manager answers produced during an install (host specific, may hold layout)
+# installer answers produced during a run (host specific, may hold disk layout)
 /archsetup-answers.json
 
 # editor / OS cruft
 .DS_Store
 *.swp
-
-# local scratch: the raw dotfiles download (already copied into nix/dotfiles/)
-/tmp/
