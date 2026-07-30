@@ -1,11 +1,8 @@
-/* colors */
-
-* {
-  al:    #00000000;
-  bg:    #1f1f1fFF;
-  bg1:   #8010E5FF;
-  bg2:   #B6FC7DFF;
-  bg3:   #D1DF1FFF;
-  bg4:   #3CBD34FF;
-  fg:    #FFFFFFFF;
-}
+/*
+ * Every rofi menu in this directory imports this file. It is a shim onto the
+ * generated palette so the polybar menus, the launcher and the powermenu all
+ * use the same colours as rofi itself.
+ *
+ * ../../color/out.rasi is written by theme_engine and is not in the repo.
+ */
+@import "../../color/out.rasi"

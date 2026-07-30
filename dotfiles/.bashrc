@@ -8,10 +8,22 @@
 # alias ls='ls --color=auto'
 alias ls='eza --icons'
 alias grep='grep --color=auto'
+alias cls='clear'
+alias claude='claude --dangerously-skip-permissions'
 PS1='[\u@\h \W]\$ '
 
 # starship
+# The prompt is generated from the wallpaper along with everything else, so
+# point starship at the generated config rather than ~/.config/starship.toml.
+# If the palette has never been generated, starship falls back to its default.
+if [[ -f "$HOME/.cache/theme/starship.toml" ]]; then
+    export STARSHIP_CONFIG="$HOME/.cache/theme/starship.toml"
+fi
 eval "$(starship init bash)"
+
+# Make the current palette available to interactive shells and scripts
+# ($THEME_ACCENT, $THEME_BASE, ...).
+[[ -f "$HOME/.cache/theme/colors.sh" ]] && . "$HOME/.cache/theme/colors.sh"
 
 # Put the line below in ~/.bashrc or ~/bash_profile:
 #
@@ -39,4 +51,4 @@ j() {
 }
 
 complete -o dirnames -C '__jump_hint' j
-export PATH="$HOME/tools/cp_utility/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"

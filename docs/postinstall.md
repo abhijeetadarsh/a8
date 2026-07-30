@@ -10,62 +10,175 @@ git clone https://github.com/<you>/arch-setup ~/arch-setup
 ~/arch-setup/installer/postinstall.sh
 ```
 
-It is safe to re-run - `pacman --needed` skips what is installed and
-`stow --restow` re-links what is already linked.
+Re-running it is the supported way to fix a half-finished install.
+
+| flag | what it does |
+| --- | --- |
+| `--repair` | always show the package picker, even when nothing is missing |
+| `--yes` | answer every prompt with the default (automation) |
+| `--no-update` | skip the initial `pacman -Syu` |
 
 ## What it does, in order
 
 1. **`pacman -Syu`** - refresh and update.
-2. **Repo packages** - the X server, pipewire, i3, polybar, rofi, picom, the
-   terminals, neovim, fonts, and the Python stack polybar's theme engine needs.
-   The list is grouped by purpose at the top of the script; that is the one
-   place to edit when you want to add something.
-3. **AUR** - builds `paru` if missing, then installs `jump` (the `j` command in
-   `.bashrc`) and `i3lock-color` (used by the lock scripts).
-4. **Services** - enables NetworkManager, bluetooth, and the pipewire user
-   services.
+2. **Packages** - the X server, pipewire, i3, polybar, rofi, picom, kitty,
+   ranger, neovim, fonts, and the Python stack the theme engine needs. The
+   list is grouped by purpose at the top of the script; that is the one place
+   to edit when you want to add something.
+3. **AUR** - builds `jump-bin` and `i3lock-color` with makepkg directly; no
+   AUR helper is installed (see below).
+4. **Services** - NetworkManager, bluetooth, and the pipewire user services.
 5. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
-6. **`~/.xinitrc`** - written so `startx` merges `.Xresources` and execs i3.
-   An existing non-symlink `.xinitrc` is left alone.
-7. **Wallpapers** - creates `~/.wallpaper/{my_collection,bing}` and warns if
-   they are empty, because the i3 config runs `theme_init.sh` at startup and
-   that script needs a wallpaper to derive the polybar colorscheme from.
+6. **`~/.xinitrc`** - written so `startx` merges the X resources and execs i3.
+7. **Palette** - generates the desktop colour scheme from a wallpaper, so the
+   first `startx` lands on a themed desktop rather than an i3 config error.
+
+## Re-running: the package picker
+
+The script never assumes its own past runs worked. It asks pacman what is
+actually installed, and if anything is missing it shows a numbered list of
+every package it manages:
+
+```
+  fonts
+     58  ttf-fantasque-sans-mono      installed
+     59  ttf-cascadia-code-nerd       installed
+     62  papirus-icon-theme           missing
+
+  6 of 71 packages are missing.
+
+  What should I install?
+
+    missing  just the missing ones
+    1 5 12   those numbers - already-installed ones get reinstalled
+    4-9      ranges work, and so do commas
+    +name    a package that is not on this list at all
+    all      reinstall everything
+    none     skip this step
+```
+
+Picking a number that is already installed reinstalls it, which is how you
+repair a package that installed but is broken. `+name` installs something that
+is not in this repo's lists at all, without editing the script first.
+
+After installing, it verifies each package against the database rather than
+trusting pacman's exit code, and records anything that did not land in
+`~/.local/state/arch-setup/failed-packages`. The next run tells you about it.
+
+A system where more than 90% of the list is missing is treated as a fresh
+install and everything goes in without the picker.
+
+## There is no AUR helper
+
+This setup needs exactly two AUR packages, so `postinstall.sh` builds them with
+`makepkg` directly rather than installing a helper to do it:
+
+```sh
+git clone --depth 1 https://aur.archlinux.org/<pkg>.git
+cd <pkg> && makepkg -si --needed
+```
+
+That avoids an entire class of failure. If you have ever seen
+
+```
+paru: error while loading shared libraries: libalpm.so.15
+```
+
+the cause is that AUR helpers link against pacman's C library. `paru-bin` is a
+prebuilt binary; pacman 7.x bumped the soname to `libalpm.so.16`; the old
+binary stopped starting. Every helper written in Rust or Go can hit this after
+a pacman upgrade, and fixing it means recompiling the helper. `makepkg` ships
+*with* pacman, so it cannot go out of sync with it.
+
+It also means no Rust toolchain: `jump-bin` is used instead of `jump` because
+it ships a prebuilt binary and needs no Go either. Everything else builds with
+`base-devel`, which is installed anyway.
+
+### Replacement packages
+
+Both AUR packages here are **drop-in replacements**, not additions:
+
+| AUR package | replaces | why |
+| --- | --- | --- |
+| `i3lock-color` | `i3lock` | same `i3lock` binary, plus the `--*-color` flags the lock script uses |
+| `jump-bin` | `jump` | identical `jump` binary, just not compiled locally |
+
+pacman will not swap those on its own - it asks *"Remove i3lock?"*, and under
+`--noconfirm` the answer is No, so the build fails at the very last step. The
+script reads `conflicts` out of the package's `.SRCINFO`, checks which are
+actually installed, asks you once, and removes them before building. If the
+build then fails, it reinstalls what it removed, so you are never left with
+neither.
+
+This is why `i3lock` is **not** in the repo package list: installing it and
+`i3lock-color` together can only fail. `i3lock-color` provides the `i3lock`
+binary, so `xss-lock ... -- i3lock --nofork` in the i3 config still works.
+
+If you had a broken paru from an earlier setup, nothing here uses it now:
+
+```sh
+sudo pacman -Rns paru-bin paru
+```
+
+To install something from the AUR by hand later, the two commands at the top of
+this section are the whole workflow.
+
+## Why is `wayland` installed?
+
+It is not a Wayland session, and removing it would take most of the desktop
+with it. `wayland` is a **library package**, and these all link against it:
+
+```
+$ pactree -r wayland -d 1
+wayland
+├─dunst        ├─gtk3     ├─kitty   ├─mesa
+├─gst-plugins  ├─gtk4     ├─libva   ├─rofi
+└─qt6-base     └─vulkan-intel
+```
+
+Upstream builds GTK, Qt, kitty, rofi and dunst with both X11 and Wayland
+backends in one binary; the Wayland code is simply never reached under X11. The
+only Wayland-specific package this repo installs on purpose is `egl-wayland`,
+pulled in by the NVIDIA driver sets in `archsetup.py`.
 
 ## How the dotfiles are linked
 
-GNU stow makes `~/.config/i3` a symlink to `~/arch-setup/dotfiles/.config/i3`,
-and so on for each program. Because the symlinks point at the **repo working
-tree**:
+GNU stow is run with `--no-folding`, which matters:
 
-- Editing a config in `dotfiles/` changes your live setup immediately. No
-  re-run, no rebuild.
-- Runtime writers keep working - `lazy.nvim` updating its lockfile, the polybar
-  theme engine writing `~/.config/polybar/shades/color/`.
-- `git diff` in the repo shows exactly how your live config has drifted.
+- `~/.config/kitty` is a **real directory** containing a symlink to
+  `kitty.conf` in the repo.
+- Without `--no-folding`, stow would make `~/.config/kitty` itself one symlink
+  into the repo - and the generated `current-theme.conf` would then be written
+  *inside the git tree*.
 
-To unlink everything:
+Because the symlinks point at the repo working tree, editing a config in
+`dotfiles/` changes your live setup immediately, and `git diff` shows exactly
+how your live config has drifted.
+
+The trade-off: adding a **new file** to `dotfiles/` needs a re-stow before it
+appears in `$HOME`.
 
 ```sh
-stow --dir=~/arch-setup --target=$HOME --delete dotfiles
+stow --dir=~/arch-setup --target=$HOME --restow --no-folding dotfiles
 ```
+
+To unlink everything, swap `--restow` for `--delete`.
 
 ## Adding a program
 
 1. Add the package to the right group at the top of `postinstall.sh`.
 2. Drop its config under `dotfiles/` at the path it expects relative to `$HOME`.
-3. Re-run the script (or just `stow --dir=... --restow dotfiles` for a
-   config-only addition).
+3. Re-run the script, or just re-stow for a config-only addition.
 
 ## Things to check on the first run
 
-- **Wallpapers** - i3 starts `theme_init.sh --my_collection`. With an empty
-  `~/.wallpaper/my_collection` you get no wallpaper and no polybar. Either put
-  images there or switch the line in `dotfiles/.config/i3/config` to `--bing`.
-- **NVIDIA** - if X will not start, check
-  `/etc/X11/xorg.conf.d/` and `journalctl -b` for the driver. The Intel iGPU
-  normally drives the built-in display fine.
-- **Fonts** - the i3 config and polybar use Fantasque Sans Mono plus Nerd Font
-  glyphs. Boxes instead of icons means a font package did not install; check
-  `fc-list | grep -i caskaydia`.
+- **Wallpapers** - the entire colour scheme is derived from one. If
+  `~/.wallpaper/my_collection` is empty the script generates a placeholder
+  gradient so the desktop still comes up themed; drop your own images in and
+  press `$mod+Shift+w`.
+- **NVIDIA** - if X will not start, check `/etc/X11/xorg.conf.d/` and
+  `journalctl -b` for the driver.
+- **Fonts** - boxes instead of icons means a font package did not install;
+  check `fc-list | grep -i caskaydia`.
