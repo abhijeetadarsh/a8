@@ -99,3 +99,49 @@ first `theme_init.sh` run. `:ThemeReload` re-applies it in a running nvim.
 The engine can build a light palette (`--light`), and all the contrast logic
 works in both directions. Nothing is wired to a toggle yet; `theme_init.sh`
 always asks for dark.
+
+## Fetching wallpapers from waifu.im
+
+`i3/script/fetch_wallpaper.sh` pulls a wallpaper from the waifu.im API, sets it
+with `feh`, and re-themes the desktop from it.
+
+```sh
+fetch_wallpaper.sh                  # random landscape waifu on every monitor
+fetch_wallpaper.sh maid             # extra tags, AND logic
+fetch_wallpaper.sh --per-monitor    # a different image on each screen
+fetch_wallpaper.sh --monitor HDMI-1 # just that one, others left alone
+fetch_wallpaper.sh --offline        # skip the network entirely
+DEBUG=1 fetch_wallpaper.sh          # show the API call and what came back
+```
+
+`$mod+Ctrl+w` runs it; `$mod+Ctrl+Shift+p` runs it per monitor.
+
+### The library is the offline fallback
+
+Downloads go to `~/.wallpaper/waifu` and stay there. With no network - or a
+captive portal, or an API error - the script picks a random image already in
+that directory instead of failing, so a laptop that boots offline still comes
+up with a wallpaper and a matching palette.
+
+`curl --max-time` bounds both the API call and the download, so an unreachable
+network delays i3 startup by seconds rather than hanging it.
+
+### The 50 MB cap
+
+The directory is capped at 50 MB (`WAIFU_MAX_MB` to change it, `WAIFU_DIR` to
+move it). The new image is always stored; **older ones are deleted to make room
+for it**, oldest first by mtime, until the directory fits. The image that was
+just downloaded and applied is protected from that sweep, so it can never be
+evicted to make space for itself.
+
+An image whose `byteSize` alone exceeds the cap is skipped before downloading -
+storing it would mean deleting the entire library for one file.
+
+### Per-monitor state
+
+Which image is on which output is tracked in `~/.cache/theme/wallpapers`, one
+`output<TAB>path` line each. `feh` takes one image per monitor in Xinerama
+order, so `--monitor` can change a single screen without disturbing the others.
+
+The palette is always derived from the image on the **first** monitor, since
+there is only one desktop colour scheme.

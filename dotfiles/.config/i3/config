@@ -87,6 +87,10 @@ bindsym $mod+Shift+period move container to output right; focus output right
 bindsym $mod+Shift+w exec --no-startup-id $HOME/.config/i3/script/theme_init.sh --my_collection
 bindsym $mod+Ctrl+Shift+w exec --no-startup-id $HOME/.config/i3/script/theme_init.sh --bing
 
+# fetch a new wallpaper from waifu.im (falls back to the local library offline)
+bindsym $mod+Ctrl+w exec --no-startup-id $HOME/.config/i3/script/fetch_wallpaper.sh
+bindsym $mod+Ctrl+Shift+p exec --no-startup-id $HOME/.config/i3/script/fetch_wallpaper.sh --per-monitor
+
 # start dmenu (a program launcher)
 # bindsym $mod+d exec --no-startup-id dmenu_run
 # A more modern dmenu replacement is rofi:

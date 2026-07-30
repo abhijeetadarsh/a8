@@ -6,7 +6,12 @@
 #   theme_init.sh --my_collection   random image from ~/.wallpaper/my_collection
 #   theme_init.sh --bing            fetch today's Bing image first
 #   theme_init.sh --file <path>     use one specific image
+#   theme_init.sh --waifu [tags]    fetch a new one from waifu.im
 #   theme_init.sh --reload          re-apply the current palette, no new colours
+#
+#   --no-wallpaper                  derive the palette but leave the desktop
+#                                   background alone (fetch_wallpaper.sh has
+#                                   already set it, possibly per monitor)
 #
 # i3 runs this at startup (exec_always) and $mod+Shift+w runs it on demand.
 
@@ -17,6 +22,15 @@ CACHE="$HOME/.cache/theme"
 STATE="$CACHE/wallpaper"
 
 die() { printf 'theme_init: %s\n' "$*" >&2; exit 1; }
+
+# fetch_wallpaper.sh can set a different image on each monitor. Re-running feh
+# with one image here would flatten that, so it is skippable.
+SET_WALLPAPER=1
+ARGS=()
+for a in "$@"; do
+    if [[ "$a" == "--no-wallpaper" ]]; then SET_WALLPAPER=0; else ARGS+=("$a"); fi
+done
+set -- "${ARGS[@]:-}"
 
 # --- 1. which wallpaper -----------------------------------------------------
 
@@ -42,11 +56,16 @@ case "${1:---my_collection}" in
         WALLPAPER="${2:-}"
         [[ -f "$WALLPAPER" ]] || die "--file needs a readable image"
         ;;
+    --waifu)
+        shift
+        # Fetches, stores, applies and then calls back in here with --file.
+        exec "$HOME/.config/i3/script/fetch_wallpaper.sh" "$@"
+        ;;
     --reload)
         WALLPAPER="$(cat "$STATE" 2>/dev/null)"
         ;;
     *)
-        die "usage: $0 [--my_collection | --bing | --file <path> | --reload]"
+        die "usage: $0 [--my_collection | --bing | --waifu [tags] | --file <path> | --reload] [--no-wallpaper]"
         ;;
 esac
 
@@ -57,7 +76,9 @@ mkdir -p "$CACHE"
 if [[ -n "${WALLPAPER:-}" && -f "$WALLPAPER" ]]; then
     python "$ENGINE" "$WALLPAPER" -o "$CACHE" || die "palette generation failed"
     printf '%s\n' "$WALLPAPER" > "$STATE"
-    command -v feh >/dev/null && feh --bg-fill "$WALLPAPER"
+    if (( SET_WALLPAPER )) && command -v feh >/dev/null; then
+        feh --bg-fill "$WALLPAPER"
+    fi
 else
     # No wallpaper anywhere. Everything below still needs colours to exist, so
     # reuse the last palette if there is one, and otherwise say so plainly

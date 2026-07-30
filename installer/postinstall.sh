@@ -115,6 +115,7 @@ PKGS_TOOLS=(
     python-pillow         # ranger image previews
     highlight atool       # ranger's scope.sh: syntax + archive previews
     ripgrep fd fzf        # telescope / grep
+    jq                    # fetch_wallpaper.sh parses the waifu.im API
     base-devel git curl wget
     unzip tree htop
     stow                  # how this repo's dotfiles get linked
