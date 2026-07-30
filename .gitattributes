@@ -5,3 +5,6 @@
 *.nix  text eol=lf
 *.json text eol=lf
 *.md   text eol=lf
+
+# the dotfiles all target Linux (i3 rice) - force LF regardless of extension
+nix/dotfiles/** text=auto eol=lf
