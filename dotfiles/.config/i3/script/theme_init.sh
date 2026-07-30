@@ -92,7 +92,8 @@ if command -v gsettings >/dev/null; then
     gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' 2>/dev/null
 fi
 
-# polybar cannot reload, only restart - launch.sh already kills the old one.
+# polybar cannot reload, only restart - launch.sh already kills the old one and
+# starts one bar per connected monitor.
 "$HOME/.config/polybar/shades/launch.sh" >/dev/null 2>&1
 
 # i3 last: it re-reads colors.conf and repaints every border.
