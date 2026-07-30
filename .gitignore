@@ -21,3 +21,6 @@ result-*
 # editor / OS cruft
 .DS_Store
 *.swp
+
+# local scratch: the raw dotfiles download (already copied into nix/dotfiles/)
+/tmp/

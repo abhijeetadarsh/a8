@@ -1,15 +1,12 @@
 { config, pkgs, ... }:
 
 {
-  # Your user environment, split into focused modules under ./modules.
-  # This is the "dotfiles repo, the Nix way": every config below is declared
-  # once here and reproduced identically on any machine you apply it to.
+  # Your user environment. This mirrors your existing i3 dotfiles exactly:
+  #   packages.nix  - every program your configs invoke
+  #   dotfiles.nix  - your config files, symlinked verbatim from ./dotfiles
   imports = [
     ./modules/packages.nix
-    ./modules/shell.nix
-    ./modules/git.nix
-    ./modules/neovim.nix
-    ./modules/sway.nix
+    ./modules/dotfiles.nix
   ];
 
   home.username = "a8";

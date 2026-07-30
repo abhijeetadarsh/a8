@@ -24,11 +24,10 @@ arch-nix-setup/
 │   ├── flake.nix             # entry point:  #<username>
 │   ├── home.nix              # imports the modules below
 │   └── modules/
-│       ├── packages.nix      # plain user packages
-│       ├── shell.nix         # bash + prompt + fzf
-│       ├── git.nix           # git identity & aliases
-│       ├── neovim.nix        # editor config
-│       └── sway.nix          # Wayland WM + companions
+│       ├── packages.nix      # every binary the dotfiles invoke
+│       └── dotfiles.nix      # your configs, symlinked verbatim (see below)
+├── nix/dotfiles/             # your actual i3 dotfiles, kept as-is
+│   └── .config/{i3,polybar,rofi,picom,alacritty,kitty,nvim,...}
 ├── examples/
 │   └── answers.example.json  # a saved installer answer set (for --config)
 ├── docs/
@@ -58,42 +57,86 @@ python archsetup.py           # or --dry-run first to preview
 
 Full walkthrough: [`docs/install.md`](docs/install.md).
 
-### 2. First boot — bootstrap your user environment
+### 2. First boot — get online and clone this repo
 
 ```sh
-nmtui                                                     # connect to wifi
-nix run home-manager/master -- switch --flake ~/.config/home-manager#<user>
-sway                                                      # start the desktop
-```
-
-The installer seeds a minimal `~/.config/home-manager` so this works out of the
-box.
-
-### 3. Graduate to this repo's config
-
-```sh
+nmtui                                              # connect to wifi
 git clone https://github.com/<you>/arch-nix-setup ~/arch-nix-setup
-home-manager switch --flake ~/arch-nix-setup/nix#<user>   # aliased to `hm`
 ```
 
-Now `nix/` is your source of truth. Edit a module, run `hm`, done.
+The repo **must** live at `~/arch-nix-setup` — the dotfiles are symlinked from
+there (see "How the dotfiles work" below). Adjust `repo` in
+`nix/modules/dotfiles.nix` if you put it elsewhere.
 
-## Managing your dotfiles
+### 3. Install the two system pieces Nix can't own, then apply
 
-Everything under `nix/modules/` is a dotfile expressed declaratively. Add a
-package, tweak a keybinding, change your git aliases — edit the module and
-`home-manager switch`. To migrate an existing dotfiles repo (native rewrite vs.
-verbatim symlink), see [`docs/dotfiles-with-nix.md`](docs/dotfiles-with-nix.md).
+The user environment is an **i3 (X11)** rice. i3, polybar, rofi and all your
+configs come from Nix, but the X server and the audio daemon are system
+services — install those from pacman:
+
+```sh
+sudo pacman -S xorg-server xorg-xinit pipewire pipewire-pulse wireplumber
+```
+
+Then build your whole user environment from this repo:
+
+```sh
+nix run home-manager/master -- switch --flake ~/arch-nix-setup/nix#a8
+startx                                             # launches i3 via ~/.xinitrc
+```
+
+After the first run, re-apply changes with:
+
+```sh
+home-manager switch --flake ~/arch-nix-setup/nix#a8
+```
+
+> At **install** time you can pick "none" for the starter WM (the installer's
+> sway/hyprland seed is only a fallback) — your real setup is this repo.
+
+## How the dotfiles work
+
+This is your existing i3 dotfiles kept **exactly as they were**, not rewritten.
+`nix/modules/dotfiles.nix` uses home-manager's `mkOutOfStoreSymlink` to symlink
+`~/.config/i3`, `~/.config/polybar`, `~/.bashrc`, etc. straight to the live
+files in `nix/dotfiles/`. Because the symlinks point at the **repo working tree**
+(not a read-only nix-store copy):
+
+- Your runtime writers keep working — polybar's `theme_engine` generating
+  `~/.config/polybar/shades`, `lazy.nvim` writing its lockfile, `vim-plug`
+  populating `~/.vim/plugged`.
+- Editing a config in `nix/dotfiles/` changes your live setup immediately —
+  no `home-manager switch` needed for a config-only edit (run it only after
+  changing a `.nix` file, e.g. adding a package).
+
+`nix/modules/packages.nix` installs every program those configs call (i3,
+polybar, rofi, picom, feh, maim, kitty, starship, neovim, fonts, …). Migration
+background (native modules vs. verbatim symlinks) is in
+[`docs/dotfiles-with-nix.md`](docs/dotfiles-with-nix.md).
+
+### Things to check on first apply
+
+- **`exa`** — your `.bashrc` aliases `ls` to `exa`, which is unmaintained and
+  may be gone from nixpkgs. If the build fails on it, switch `exa` → `eza` in
+  `nix/modules/packages.nix` and edit the alias in `nix/dotfiles/.bashrc`.
+- **Theme engine** — `packages.nix` pulls a Python with numpy/opencv/sklearn
+  (~1 GB) for `polybar/theme_engine`. Comment that block out if you don't use
+  the wallpaper→colors feature.
+- **Fonts** — uses `nerd-fonts.caskaydia-cove`; on older nixpkgs the attribute
+  was `nerdfonts`. Adjust if it doesn't resolve.
 
 ## Customizing for your machine
 
-The defaults target the author's setup (user `a8`, Intel+NVIDIA laptop, sway).
+The defaults target the author's setup (user `a8`, Intel+NVIDIA laptop, i3/X11).
 Change:
 
 - **Username** — `home.username`/`homeDirectory` in `nix/home.nix` and the
   `homeConfigurations."a8"` key in `nix/flake.nix` (keep them in sync).
-- **Git identity** — `nix/modules/git.nix`.
-- **Packages / WM** — `nix/modules/packages.nix`, `nix/modules/sway.nix`.
+- **Any config** (i3 keybinds, polybar, git identity, nvim…) — edit the file
+  directly under `nix/dotfiles/`; it's your live config.
+- **Add/remove programs** — `nix/modules/packages.nix`, then `home-manager switch`.
+- **Repo location** — if not `~/arch-nix-setup`, update `repo` in
+  `nix/modules/dotfiles.nix`.
 - **Partitions, kernel, drivers** — answered interactively by the installer;
   a saved set lives in `examples/answers.example.json` (replay with `--config`).
 

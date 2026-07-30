@@ -1,0 +1,81 @@
+configuration {
+	display-drun: "Applications:";
+	display-window: "Windows:";
+	drun-display-format: "{icon} {name}";
+	modi: "window,run,drun";
+	show-icons: true;
+}
+
+* {
+	font: "Jetbrains Mono 12";
+	fg: #f8f8f2;
+	bg: #282a36;
+	active-bg: #44475a;
+	urgent-bg: #ff5555;
+	urgent-fg: #282a36;
+
+	selected-background: @active-bg;
+	selected-urgent-background: @urgent-bg;
+	selected-active-background: @active-bg;
+	separatorcolor: #6272a4;
+	bordercolor: #6272a4;
+
+	border: 0;
+	margin: 0;
+	padding: 0;
+	spacing: 0;
+}
+
+window {
+	width: 45%;
+}
+
+element {
+	padding: 12;
+	text-color: @fg;
+	background-color: @bg;
+}
+
+element selected {
+	background-color: @active-bg;
+}
+
+element-text {
+	background-color: inherit;
+	text-color: inherit;
+	vertical-align: 0.5;
+}
+
+element-icon {
+	size: 30;
+	background-color: transparent;
+}
+
+entry {
+	background-color: @bg;
+	padding: 12;
+	text-color: @fg;
+}
+
+inputbar {
+	children: [prompt, entry];
+}
+
+listview {
+	background-color: @bg;
+	columns: 1;
+	lines: 8;
+}
+
+mainbox {
+	background-color: @bg;
+	children: [inputbar, listview];
+}
+
+prompt {
+	background-color: @bg;
+	enable: true;
+	padding: 12 0 0 12;
+	text-color: @fg;
+}
+
