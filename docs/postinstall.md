@@ -182,3 +182,53 @@ To unlink everything, swap `--restow` for `--delete`.
   `journalctl -b` for the driver.
 - **Fonts** - boxes instead of icons means a font package did not install;
   check `fc-list | grep -i caskaydia`.
+
+## Monitors
+
+`i3/script/monitors.sh` detects what is connected, arranges it left to right,
+and generates `~/.config/i3/monitors.conf` with the workspace assignments. i3
+runs it at startup; `$mod+Shift+m` re-runs it after plugging a screen in.
+
+| monitors | workspaces |
+| --- | --- |
+| 1 | all ten on it |
+| 2 | 1-5 on the first, 6-10 on the second |
+| 3+ | divided evenly, in order |
+
+### Changing the monitor order
+
+The first monitor in the order is the primary and gets workspaces 1-5. By
+default that is the internal panel (`eDP-*`/`LVDS-*`), then whatever else
+xrandr reports. To choose explicitly, list the outputs left to right:
+
+```sh
+printf 'HDMI-1\neDP-1\n' > ~/.config/i3/monitor-order
+~/.config/i3/script/monitors.sh          # apply now
+```
+
+`xrandr --query | grep " connected"` lists the names. To try an order without
+committing to it:
+
+```sh
+~/.config/i3/script/monitors.sh --print --order "HDMI-1 eDP-1"   # preview
+~/.config/i3/script/monitors.sh --order "HDMI-1 eDP-1"           # apply once
+```
+
+Outputs in the file that are not plugged in are skipped, and anything
+connected but unlisted is appended on the right - so the same file works
+docked and undocked. Delete it to go back to auto-detection.
+
+### Why each workspace gets exactly one output
+
+`monitors.conf` never writes a fallback list like
+`workspace 1 output eDP-1 HDMI-1`. When an output is left with no workspace,
+i3 fills it with the first workspace *assigned to that output*, and an
+assignment matches if the output appears anywhere in its list - so the fallback
+made workspace 1 a candidate for the external screen, which then showed 1, 2,
+4 instead of 6. The file is regenerated on every start, so fallbacks buy
+nothing anyway.
+
+`workspace N output X` also only applies when a workspace is **created**.
+Existing workspaces stay where they are across a reload, a restart, and across
+plugging a monitor in, so `monitors.sh` moves them explicitly after writing the
+file.

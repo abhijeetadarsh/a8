@@ -28,15 +28,43 @@
 set -uo pipefail
 
 OUT="$HOME/.config/i3/monitors.conf"
+
+# Where you say which monitor comes first. One output name per line, in
+# left-to-right order; blank lines and #comments ignored. Outputs listed here
+# but not plugged in are skipped, and anything connected but not listed is
+# appended on the right. Delete the file to go back to auto-detection.
+#
+#     printf 'HDMI-1\neDP-1\n' > ~/.config/i3/monitor-order
+#     ~/.config/i3/script/monitors.sh
+ORDER_FILE="$HOME/.config/i3/monitor-order"
+
 APPLY=1
 PRINT=0
 
-case "${1:-}" in
-    --no-apply) APPLY=0 ;;
-    --print)    PRINT=1; APPLY=0 ;;
-    "")         ;;
-    *)          printf 'usage: %s [--no-apply | --print]\n' "$0" >&2; exit 1 ;;
-esac
+while (( $# )); do
+    case "$1" in
+        --no-apply) APPLY=0 ;;
+        --print)    PRINT=1; APPLY=0 ;;
+        --order)    shift; ORDER_OVERRIDE="${1:-}" ;;
+        --help|-h)
+            cat <<EOF
+usage: $0 [--print] [--no-apply] [--order "OUT1 OUT2"]
+
+  --print    show the layout it would write, change nothing
+  --no-apply write monitors.conf but do not run xrandr
+  --order    left-to-right monitor order for this run only,
+             e.g. --order "HDMI-1 eDP-1"
+
+Order is taken from, in priority order:
+  1. --order
+  2. $ORDER_FILE
+  3. auto: the internal panel first, then xrandr's order
+EOF
+            exit 0 ;;
+        *) printf 'unknown option: %s (try --help)\n' "$1" >&2; exit 1 ;;
+    esac
+    shift
+done
 
 command -v xrandr >/dev/null || { printf 'monitors: xrandr not found\n' >&2; exit 1; }
 
@@ -49,23 +77,56 @@ if (( ${#CONNECTED[@]} == 0 )); then
     exit 1
 fi
 
-# The internal panel is the anchor: it is the one that is always there, so it
-# gets to be primary and everything else is placed relative to it. Falls back
-# to whatever xrandr already calls primary, then to the first output.
-PRIMARY=""
-for o in "${CONNECTED[@]}"; do
-    case "$o" in eDP*|LVDS*) PRIMARY="$o"; break ;; esac
-done
-if [[ -z "$PRIMARY" ]]; then
-    PRIMARY="$(xrandr --query | awk '/ connected primary/ {print $1; exit}')"
-fi
-[[ -z "$PRIMARY" ]] && PRIMARY="${CONNECTED[0]}"
+# --- 1b. what order they go in ----------------------------------------------
 
-# Everything else, in xrandr's order, placed to the right of primary.
-SECONDARY=()
-for o in "${CONNECTED[@]}"; do
-    [[ "$o" == "$PRIMARY" ]] || SECONDARY+=("$o")
+is_connected() {
+    local o
+    for o in "${CONNECTED[@]}"; do [[ "$o" == "$1" ]] && return 0; done
+    return 1
+}
+
+WANTED=()
+if [[ -n "${ORDER_OVERRIDE:-}" ]]; then
+    read -r -a WANTED <<< "$ORDER_OVERRIDE"
+elif [[ -f "$ORDER_FILE" ]]; then
+    while read -r line; do
+        line="${line%%#*}"; line="${line//[[:space:]]/}"
+        [[ -n "$line" ]] && WANTED+=("$line")
+    done < "$ORDER_FILE"
+fi
+
+ORDERED=()
+for o in "${WANTED[@]:-}"; do
+    # Silently skip what is in the list but not plugged in: that is the whole
+    # point of the file surviving an undock.
+    [[ -n "$o" ]] && is_connected "$o" && ORDERED+=("$o")
 done
+
+# Anything connected that the order file did not mention goes on the right.
+for o in "${CONNECTED[@]}"; do
+    seen=0
+    for p in "${ORDERED[@]:-}"; do [[ "$p" == "$o" ]] && { seen=1; break; }; done
+    (( seen )) || ORDERED+=("$o")
+done
+
+if (( ${#WANTED[@]} == 0 )); then
+    # No explicit order. The internal panel is the natural anchor - it is the
+    # one that is always there - so it goes first, then xrandr's own order.
+    PRIMARY=""
+    for o in "${CONNECTED[@]}"; do
+        case "$o" in eDP*|LVDS*) PRIMARY="$o"; break ;; esac
+    done
+    [[ -z "$PRIMARY" ]] && PRIMARY="$(xrandr --query | awk '/ connected primary/ {print $1; exit}')"
+    [[ -z "$PRIMARY" ]] && PRIMARY="${CONNECTED[0]}"
+
+    ORDERED=("$PRIMARY")
+    for o in "${CONNECTED[@]}"; do
+        [[ "$o" == "$PRIMARY" ]] || ORDERED+=("$o")
+    done
+fi
+
+PRIMARY="${ORDERED[0]}"
+SECONDARY=("${ORDERED[@]:1}")
 
 # --- 2. how the ten workspaces are split ------------------------------------
 #
