@@ -120,8 +120,9 @@ program reads its config, not something the script can work around:
 | neovim | `:ThemeReload`, or next launch |
 
 A Firefox profile that does not exist yet cannot be themed, so the very first
-run after installing skips it. The next `theme_init.sh` - which i3 runs at
-login - picks it up.
+run after installing skips it - and says so, rather than leaving a program
+silently missing from the list. The next `theme_init.sh` (i3 runs one at every
+login) picks it up once Firefox has been started once.
 
 ## Adding a program to the theme
 

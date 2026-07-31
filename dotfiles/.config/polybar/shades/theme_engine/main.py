@@ -244,6 +244,18 @@ def main():
     if skipped:
         msg += f"  (skipped, not installed: {', '.join(skipped)})"
     print(msg)
+
+    # A program with no target at all produces no line above - it is not
+    # "skipped", it simply never appeared. Firefox is the one case where that
+    # is expected rather than a bug: profiles are created on first launch, so
+    # a machine that has installed Firefox but not yet run it has nothing to
+    # write into. Say so, or the omission looks like the theme quietly failing.
+    if not firefox_profiles(args.home_dir):
+        print(
+            "theme_engine: firefox has no profile yet - run it once, then this "
+            "will theme it (i3 re-runs theme_init.sh at every login)"
+        )
+
     return 0
 
 

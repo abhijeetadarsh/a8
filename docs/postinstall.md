@@ -37,6 +37,9 @@ Re-running it is the supported way to fix a half-finished install.
    yourself is left alone.
 7. **Palette** - generates the desktop colour scheme from a wallpaper, so the
    first `startx` lands on a themed desktop rather than an i3 config error.
+   i3's other generated include, `monitors.conf`, gets an empty placeholder for
+   the same reason: the script cannot work out the real monitor layout without
+   a running X server, and `monitors.sh` rewrites it at every i3 start anyway.
 
 ## Re-running: the package picker
 

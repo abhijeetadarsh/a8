@@ -770,6 +770,37 @@ do_theme() {
         note "  python $engine \"$wall\""
         return 1
     fi
+
+    # Firefox has no profile until it has been run once, so the engine has
+    # nothing to write into on a fresh machine. Say it here too - the engine's
+    # own message is swallowed by the redirect above.
+    if command -v firefox >/dev/null && [[ ! -d "$HOME/.mozilla/firefox" ]]; then
+        note "firefox has no profile yet - run it once, then \$mod+Shift+w themes it"
+    fi
+
+    # The same first-boot problem colors.conf has, for the other generated
+    # include in i3's config. i3 parses `include monitors.conf` while it
+    # starts; monitors.sh only runs afterwards as exec_always, so on a first
+    # boot the file does not exist yet. i3 tolerates that silently, which is
+    # worse than it sounds - the workspace assignments are simply absent until
+    # theme_init.sh's `i3-msg reload` lands a second later.
+    #
+    # The placeholder assigns nothing on purpose: real output names need
+    # xrandr against a running X server, and there is not one yet. It only has
+    # to make the first parse complete. monitors.sh overwrites it at every i3
+    # start with the layout that is actually plugged in.
+    local mon="$HOME/.config/i3/monitors.conf"
+    if [[ -d "$HOME/.config/i3" && ! -e "$mon" ]]; then
+        cat > "$mon" <<'EOF'
+# Placeholder written by postinstall.sh so i3's `include monitors.conf` has
+# something to read on the very first startx.
+#
+# It is empty because working out which outputs exist needs xrandr against a
+# running X server. monitors.sh replaces this with the real
+# `workspace N output ...` lines at every i3 start, and on $mod+Shift+m.
+EOF
+        note "wrote a placeholder ~/.config/i3/monitors.conf for the first startx"
+    fi
 }
 
 # ============================================================================
