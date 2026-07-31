@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
 #
-# fetch_wallpaper.sh - pull a wallpaper from waifu.im and set it under X11.
+# fetch_wallpaper.sh - download a wallpaper and set it under X11.
 #
-#   fetch_wallpaper.sh                 random landscape waifu on every monitor
-#   fetch_wallpaper.sh maid            extra tags (AND logic)
-#   fetch_wallpaper.sh --per-monitor   a different image on each monitor
-#   fetch_wallpaper.sh --monitor HDMI-1 tag
-#   fetch_wallpaper.sh --offline       skip the network, use what is cached
-#   DEBUG=1 fetch_wallpaper.sh
+# Two sources, one pipeline:
 #
-# This is the X11/i3 version of the hyprpaper script: hyprctl is replaced by
-# feh, which is what the rest of this setup already uses.
+#   fetch_wallpaper.sh                  random landscape waifu from waifu.im
+#   fetch_wallpaper.sh maid             extra tags (AND logic), waifu.im only
+#   fetch_wallpaper.sh --bing           today's Bing image of the day
 #
-# The download directory doubles as an offline library. Every image fetched is
-# kept, so with no network the script simply picks one that is already there
-# rather than failing. The directory is capped by total size, and the oldest
-# files are deleted to stay under it - a new image is always stored, something
-# else makes room for it.
+#   --per-monitor                       a different image on each monitor
+#                                       (--bing walks back through recent days)
+#   --monitor HDMI-1                    just that one, others left alone
+#   --offline                           skip the network, use what is cached
+#   --no-theme                          set the wallpaper, do not re-theme
+#   DEBUG=1                             show the API call and what came back
+#
+# Each source keeps its own library under ~/.wallpaper/<source>, and both go
+# through the same store-cap-apply-retheme path. Every image fetched is kept,
+# so with no network the script picks one that is already there rather than
+# failing. Each library is capped by total size and the oldest files are
+# deleted to stay under it - a new image is always stored, something else
+# makes room for it.
 
 set -uo pipefail
 
 # --- settings ---------------------------------------------------------------
 
-# Lives under ~/.wallpaper alongside my_collection and bing, not in ~/.cache:
-# these are wallpapers you keep, and theme_init.sh looks for them here.
-DIR="${WAIFU_DIR:-$HOME/.wallpaper/waifu}"
+SOURCE=waifu                            # or bing, via --bing
 
-# Hard cap on the directory, in megabytes.
+# Hard cap on a library, in megabytes.
 MAX_MB="${WAIFU_MAX_MB:-50}"
 
 ORIENTATION="LANDSCAPE"
@@ -48,18 +50,32 @@ die()   { printf '%sfetch_wallpaper: %s%s\n' "$R" "$*" "$N" >&2; exit 1; }
 
 while (( $# )); do
     case "$1" in
+        --bing)        SOURCE=bing ;;
+        --waifu)       SOURCE=waifu ;;
         --per-monitor) PER_MONITOR=1 ;;
         --monitor)     shift; MONITOR="${1:-}" ;;
         --offline)     OFFLINE=1 ;;
         --no-theme)    NO_THEME=1 ;;
         --help|-h)
-            sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'
+            # Everything from line 3 down to the first non-comment line, so the
+            # help text cannot drift out of sync with a hardcoded line range.
+            awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' "$0"
             exit 0 ;;
         -*)            die "unknown option: $1 (try --help)" ;;
         *)             TAGS+=("$1") ;;
     esac
     shift
 done
+
+# Lives under ~/.wallpaper alongside my_collection, not in ~/.cache: these are
+# wallpapers you keep, and theme_init.sh looks for them here. One directory per
+# source, so pruning one library never eats the other.
+if [[ "$SOURCE" == bing ]]; then
+    DIR="${BING_DIR:-$HOME/.wallpaper/bing}"
+    (( ${#TAGS[@]} )) && say "fetch_wallpaper: bing has no tags, ignoring: ${TAGS[*]}"
+else
+    DIR="${WAIFU_DIR:-$HOME/.wallpaper/waifu}"
+fi
 
 for bin in curl feh xrandr; do
     command -v "$bin" >/dev/null || die "missing: $bin"
@@ -112,8 +128,59 @@ prune() {
 
 # --- fetch ------------------------------------------------------------------
 
-# Echoes the path of a newly downloaded image, or nothing on any failure.
+# Both sources echo the path of a newly downloaded image, or nothing on any
+# failure, so the caller never has to know which one it asked.
+# $1 is which image of a series this is, counting from 0. Only bing uses it -
+# it cannot be a counter inside these functions, because every caller runs them
+# in a "$(...)" subshell and any variable they increment dies with it.
 fetch_one() {
+    case "$SOURCE" in
+        bing) fetch_bing "${1:-0}" ;;
+        *)    fetch_waifu ;;
+    esac
+}
+
+# Bing publishes one image a day, addressed by how many days back you want it.
+# --per-monitor therefore walks backwards through the archive rather than
+# asking for the same picture once per screen. Bing keeps about a week.
+fetch_bing() {
+    (( HAVE_JQ )) || { dbg "jq not installed - cannot query the API"; return 1; }
+
+    local idx="$1"
+    if (( idx > 7 )); then
+        dbg "bing keeps about 8 days - nothing further back to ask for"
+        return 1
+    fi
+
+    local api="https://www.bing.com/HPImageArchive.aspx?format=js&idx=${idx}&n=1&mkt=en-US"
+    dbg "GET $api"
+
+    local body base
+    # --max-time so a captive portal or dead link cannot hang i3 startup.
+    body=$(curl -sS --max-time 20 -H 'Accept: application/json' "$api" 2>/dev/null) || {
+        dbg "curl failed"; return 1; }
+
+    base=$(jq -r '.images[0].urlbase // empty' <<<"$body" 2>/dev/null)
+    [[ -z "$base" ]] && { dbg "unexpected response: $body"; return 1; }
+
+    # urlbase looks like "/th?id=OHR.VirginiaTrail_EN-US9403114082". The id is
+    # stable per image, which is what makes it a good filename - re-running on
+    # the same day finds the file already there instead of downloading twice.
+    # The suffix picks a resolution; UHD is the largest Bing serves.
+    local id="${base##*id=}"
+    local file="$DIR/${id}_UHD.jpg"
+
+    if [[ ! -f "$file" ]]; then
+        curl -fsSL --max-time 60 -o "$file.part" "https://www.bing.com${base}_UHD.jpg" 2>/dev/null || {
+            rm -f "$file.part"; dbg "download failed"; return 1; }
+        mv -f "$file.part" "$file"
+    fi
+    touch "$file"                      # newest, so pruning keeps it longest
+    dbg "got $(basename "$file") (bing idx $idx)"
+    printf '%s' "$file"
+}
+
+fetch_waifu() {
     (( HAVE_JQ )) || { dbg "jq not installed - cannot query the API"; return 1; }
 
     local q="IsNsfw=False&Orientation=${ORIENTATION}&Width=%3E%3D${MIN_WIDTH}&OrderBy=Random&PageSize=1"
@@ -185,7 +252,7 @@ fi
 
 get_image() {
     local f=""
-    (( OFFLINE )) || f="$(fetch_one)"
+    (( OFFLINE )) || f="$(fetch_one "${1:-0}")"
     if [[ -z "$f" ]]; then
         f="$(pick_cached)"
         [[ -n "$f" ]] && dbg "offline - using cached $(basename "$f")"
@@ -204,8 +271,10 @@ fi
 
 NEW=()
 if (( PER_MONITOR )) || [[ -n "${MONITOR:-}" ]]; then
+    n=0
     for m in "${TARGETS[@]}"; do
-        img="$(get_image)"
+        img="$(get_image "$n")"
+        n=$(( n + 1 ))
         [[ -z "$img" ]] && die "no wallpaper available (no network and nothing cached in $DIR)"
         CURRENT["$m"]="$img"
         NEW+=("$img")

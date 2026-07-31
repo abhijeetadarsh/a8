@@ -5,9 +5,31 @@ and i3, polybar, rofi, kitty, dunst, GTK, Qt, Firefox, Thunar, neovim, ranger,
 the shell prompt and the lock screen all change with it.
 
 ```
-$mod+Shift+w        new random wallpaper, re-theme everything
-$mod+Ctrl+Shift+w   fetch today's Bing image and theme from that
+$mod+Shift+w        new wallpaper, re-theme everything
 ```
+
+That is the only wallpaper key. Where it gets the image from is one
+environment variable, exported in `~/.xinitrc`:
+
+```sh
+export WALLPAPER_SOURCE=my_collection   # random image from ~/.wallpaper/my_collection
+export WALLPAPER_SOURCE=bing            # Bing's image of the day
+export WALLPAPER_SOURCE=waifu           # random landscape from waifu.im
+```
+
+`my_collection` is the default, and an unrecognised value is an error rather
+than a silent fallback to something you did not ask for. Changing it means
+restarting X, since i3 inherits the variable from `~/.xinitrc`. For a one-off
+from a different source, the flags still work from a terminal:
+`theme_init.sh --bing`, `--waifu [tags]`, `--file <path>`.
+
+One image on every screen. `bing` and `waifu` download a new image each press;
+`my_collection` picks a different file you already have.
+
+Changing the wallpaper is always something you ask for - **logging in or
+rebooting brings back the one you were already using**, it never picks a new
+one. i3 runs `theme_init.sh --reload` at startup for exactly that reason; any
+other mode there would mean a reboot silently threw away your wallpaper.
 
 ## The pipeline
 
@@ -161,42 +183,70 @@ The engine can build a light palette (`--light`), and all the contrast logic
 works in both directions. Nothing is wired to a toggle yet; `theme_init.sh`
 always asks for dark.
 
-## Fetching wallpapers from waifu.im
+## Fetching wallpapers
 
-`i3/script/fetch_wallpaper.sh` pulls a wallpaper from the waifu.im API, sets it
-with `feh`, and re-themes the desktop from it.
+`i3/script/fetch_wallpaper.sh` downloads a wallpaper, sets it with `feh`, and
+re-themes the desktop from it. It is the only downloader - both sources go
+through the same store, cap, apply and re-theme path.
 
 ```sh
 fetch_wallpaper.sh                  # random landscape waifu on every monitor
-fetch_wallpaper.sh maid             # extra tags, AND logic
+fetch_wallpaper.sh maid             # extra tags, AND logic (waifu.im only)
+fetch_wallpaper.sh --bing           # today's Bing image of the day
 fetch_wallpaper.sh --per-monitor    # a different image on each screen
 fetch_wallpaper.sh --monitor HDMI-1 # just that one, others left alone
 fetch_wallpaper.sh --offline        # skip the network entirely
 DEBUG=1 fetch_wallpaper.sh          # show the API call and what came back
 ```
 
-`$mod+Ctrl+w` runs it; `$mod+Ctrl+Shift+p` runs it per monitor.
+`$mod+Shift+w` reaches this script whenever `WALLPAPER_SOURCE` is `bing` or
+`waifu`; `theme_init.sh` handles `my_collection` itself, since nothing needs
+downloading.
+
+`--per-monitor` is not bound to a key on purpose: the same image on every
+screen is the default everywhere, and a plain run resets a per-monitor split
+back to one image. The flag is there if you want it.
+
+### The two sources
+
+| | waifu.im | Bing |
+| --- | --- | --- |
+| library | `~/.wallpaper/waifu` | `~/.wallpaper/bing` |
+| picks | a random image matching your tags | the image of the day |
+| `--per-monitor` | a different random image per screen | walks back a day per screen |
+
+Both talk to a plain JSON endpoint with `curl` and `jq`, which are installed
+anyway. Neither needs a helper binary - the old `download_wallpaper.sh` shelled
+out to `/usr/local/bin/bing-wallpaper`, which nothing in this repo installs, so
+`--bing` could never have worked on a machine built by `postinstall.sh`.
+
+Bing's image is addressed by how many days back you want it, and it keeps about
+eight. The filename comes from Bing's own stable image id, so re-running on the
+same day finds the file already there instead of downloading it twice.
 
 ### The library is the offline fallback
 
-Downloads go to `~/.wallpaper/waifu` and stay there. With no network - or a
-captive portal, or an API error - the script picks a random image already in
-that directory instead of failing, so a laptop that boots offline still comes
-up with a wallpaper and a matching palette.
+Downloads stay in their source's directory. With no network - or a captive
+portal, or an API error - the script picks a random image already in that
+directory instead of failing, so a laptop that boots offline still comes up
+with a wallpaper and a matching palette.
 
 `curl --max-time` bounds both the API call and the download, so an unreachable
 network delays i3 startup by seconds rather than hanging it.
 
 ### The 50 MB cap
 
-The directory is capped at 50 MB (`WAIFU_MAX_MB` to change it, `WAIFU_DIR` to
-move it). The new image is always stored; **older ones are deleted to make room
-for it**, oldest first by mtime, until the directory fits. The image that was
-just downloaded and applied is protected from that sweep, so it can never be
-evicted to make space for itself.
+Each library is capped at 50 MB (`WAIFU_MAX_MB` to change it; `WAIFU_DIR` and
+`BING_DIR` to move them). The cap is per source, so pruning one library never
+eats the other. The new image is always stored; **older ones are deleted to
+make room for it**, oldest first by mtime, until the directory fits. The image
+that was just downloaded and applied is protected from that sweep, so it can
+never be evicted to make space for itself.
 
 An image whose `byteSize` alone exceeds the cap is skipped before downloading -
-storing it would mean deleting the entire library for one file.
+storing it would mean deleting the entire library for one file. Only waifu.im
+reports a size up front; a Bing image is a few megabytes and is fetched
+directly.
 
 ### Per-monitor state
 

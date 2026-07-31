@@ -692,6 +692,18 @@ fi
 # windows under i3 without this.
 export _JAVA_AWT_WM_NONREPARENTING=1
 
+# Where \$mod+Shift+w gets a new wallpaper from. i3 inherits this, so the one
+# key can change source without rebinding anything:
+#
+#   my_collection   a random image from ~/.wallpaper/my_collection
+#   bing            Bing's image of the day
+#   waifu           a random landscape from waifu.im
+#
+# Edit this line and restart X to change it. Booting never picks a new
+# wallpaper regardless - i3 runs theme_init.sh --reload, which puts back the
+# one already in use.
+export WALLPAPER_SOURCE=my_collection
+
 exec i3
 EOF
     chmod +x "$HOME/.xinitrc"

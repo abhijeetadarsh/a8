@@ -15,12 +15,18 @@ set $mod Mod4
 # every startup and every wallpaper change; it defines $base, $accent, $text
 # and the client.* block, so it has to be included before anything uses them.
 # (Generated file - it is not in the repo. Run theme_init.sh if it is missing.)
-include colors.conf
+#
+# The paths are absolute on purpose. This config is a stow symlink into the
+# repo, and i3 resolves a *relative* include against the symlink's target
+# directory - so `include colors.conf` looks inside dotfiles/.config/i3/,
+# where the generated files never are. A missing include is not an error in
+# i3, so that failure is completely silent.
+include ~/.config/i3/colors.conf
 
 # Which workspace lives on which monitor. monitors.sh regenerates this
 # from whatever is plugged in, so the same config works docked and
 # undocked. (Generated - run monitors.sh if it is missing.)
-include monitors.conf
+include ~/.config/i3/monitors.conf
 
 # Font for window titles. Will also be used by the bar unless a different font
 # is used in the bar {} block below.
@@ -72,7 +78,7 @@ bindsym $mod+Return exec --no-startup-id kitty
 bindsym $mod+n exec --no-startup-id kitty -e ranger
 
 # kill focused window
-bindsym $mod+Shift+q kill
+bindsym $mod+q kill
 
 # re-detect monitors after plugging a screen in, then reload
 bindsym $mod+Shift+m exec --no-startup-id "$HOME/.config/i3/script/monitors.sh && i3-msg reload && $HOME/.config/polybar/shades/launch.sh"
@@ -83,13 +89,11 @@ bindsym $mod+period focus output right
 bindsym $mod+Shift+comma move container to output left; focus output left
 bindsym $mod+Shift+period move container to output right; focus output right
 
-# reshuffle the wallpaper and re-theme the whole desktop from it
-bindsym $mod+Shift+w exec --no-startup-id $HOME/.config/i3/script/theme_init.sh --my_collection
-bindsym $mod+Ctrl+Shift+w exec --no-startup-id $HOME/.config/i3/script/theme_init.sh --bing
-
-# fetch a new wallpaper from waifu.im (falls back to the local library offline)
-bindsym $mod+Ctrl+w exec --no-startup-id $HOME/.config/i3/script/fetch_wallpaper.sh
-bindsym $mod+Ctrl+Shift+p exec --no-startup-id $HOME/.config/i3/script/fetch_wallpaper.sh --per-monitor
+# The only wallpaper key: a new wallpaper, re-themed from it, on every screen.
+# Where it comes from is $WALLPAPER_SOURCE (my_collection, bing or waifu),
+# exported in ~/.xinitrc. theme_init.sh --bing / --waifu / --file still work
+# from a terminal for a one-off from somewhere else.
+bindsym $mod+Shift+w exec --no-startup-id $HOME/.config/i3/script/theme_init.sh --new
 
 # start dmenu (a program launcher)
 # bindsym $mod+d exec --no-startup-id dmenu_run
@@ -186,11 +190,11 @@ bindsym $mod+Shift+8 move container to workspace number $ws8
 bindsym $mod+Shift+9 move container to workspace number $ws9
 bindsym $mod+Shift+0 move container to workspace number $ws10
 
-assign [class="Code"] $ws2
-assign [class="firefox"] $ws3
-assign [class="Chromium"] $ws4
-assign [class="TelegramDesktop"] $ws9
-assign [class="Thunar"] $ws10
+# assign [class="Code"] $ws2
+# assign [class="firefox"] $ws3
+# assign [class="Chromium"] $ws4
+# assign [class="TelegramDesktop"] $ws9
+# assign [class="Thunar"] $ws10
 
 for_window [class="pavucontrol"] floating enable
 for_window [class="Yad"] floating enable
@@ -248,7 +252,10 @@ exec_always --no-startup-id picom --config $HOME/.config/picom/picom.conf -b
 # Polybar Launch Script
 # exec_always --no-startup-id $HOME/.config/polybar/shades/launch.sh
 
-exec_always --no-startup-id $HOME/.config/i3/script/theme_init.sh --my_collection
+# Re-apply the wallpaper that was already in use, rather than picking a new
+# one. This used to be --my_collection, which meant every single boot threw
+# away whatever you had set and reverted to the placeholder gradient.
+exec_always --no-startup-id $HOME/.config/i3/script/theme_init.sh --reload
 
 # Remove border and titles
 for_window [class=".*"] border pixel 2

@@ -3,17 +3,25 @@
 # theme_init.sh - pick a wallpaper, derive the desktop palette from it, and
 # reload everything that can be reloaded without a logout.
 #
+#   theme_init.sh --new             a new wallpaper from $WALLPAPER_SOURCE
 #   theme_init.sh --my_collection   random image from ~/.wallpaper/my_collection
 #   theme_init.sh --bing            fetch today's Bing image first
 #   theme_init.sh --file <path>     use one specific image
 #   theme_init.sh --waifu [tags]    fetch a new one from waifu.im
-#   theme_init.sh --reload          re-apply the current palette, no new colours
+#   theme_init.sh --reload          put back the wallpaper already in use
+#
+# $WALLPAPER_SOURCE picks which of those --new means: my_collection (default),
+# bing, or waifu. It is exported from ~/.xinitrc, so i3 and everything it
+# starts inherit it. $mod+Shift+w is the only wallpaper key and it runs --new.
 #
 #   --no-wallpaper                  derive the palette but leave the desktop
 #                                   background alone (fetch_wallpaper.sh has
 #                                   already set it, possibly per monitor)
 #
-# i3 runs this at startup (exec_always) and $mod+Shift+w runs it on demand.
+# i3 runs `--reload` at startup, so a reboot brings back the wallpaper you were
+# actually using. Every other mode picks a *new* image, which is why none of
+# them belongs in exec_always: booting would silently discard your wallpaper.
+# $mod+Shift+w is the on-demand "give me a different one".
 
 set -uo pipefail
 
@@ -41,10 +49,27 @@ pick_random() {
            -o -iname '*.webp' -o -iname '*.bmp' \) 2>/dev/null | shuf -n 1
 }
 
-case "${1:---my_collection}" in
+# --new is the one the keybinding uses. Resolve it here so the rest of the
+# script only ever sees a concrete source, and an unusable $WALLPAPER_SOURCE
+# says so instead of silently falling back to something you did not ask for.
+if [[ "${1:-}" == "--new" ]]; then
+    shift
+    case "${WALLPAPER_SOURCE:-my_collection}" in
+        my_collection|collection|local) set -- --my_collection "$@" ;;
+        bing)                           set -- --bing "$@" ;;
+        waifu|waifu.im)                 set -- --waifu "$@" ;;
+        *) die "WALLPAPER_SOURCE=${WALLPAPER_SOURCE} is not one of: my_collection, bing, waifu" ;;
+    esac
+fi
+
+# Default to --reload: a bare run should not change which wallpaper you have.
+case "${1:---reload}" in
     --bing)
-        "$HOME/.config/i3/script/download_wallpaper.sh" >/dev/null 2>&1
-        WALLPAPER="$(pick_random "$HOME/.wallpaper/bing")"
+        shift
+        # Same path as --waifu: fetches, stores, applies, then calls back in
+        # here with --file. Errors are not swallowed - a failed download used
+        # to look exactly like a working one.
+        exec "$HOME/.config/i3/script/fetch_wallpaper.sh" --bing "$@"
         ;;
     --my_collection)
         WALLPAPER="$(pick_random "$HOME/.wallpaper/my_collection")"
@@ -62,10 +87,17 @@ case "${1:---my_collection}" in
         exec "$HOME/.config/i3/script/fetch_wallpaper.sh" "$@"
         ;;
     --reload)
+        # What i3 runs at every start. The recorded wallpaper may have been
+        # pruned out of a library since, so fall back the same way
+        # --my_collection does rather than coming up unthemed.
         WALLPAPER="$(cat "$STATE" 2>/dev/null)"
+        if [[ -z "$WALLPAPER" || ! -f "$WALLPAPER" ]]; then
+            WALLPAPER="$(pick_random "$HOME/.wallpaper/my_collection")"
+            [[ -z "$WALLPAPER" ]] && WALLPAPER="$(pick_random "$HOME/.wallpaper")"
+        fi
         ;;
     *)
-        die "usage: $0 [--my_collection | --bing | --waifu [tags] | --file <path> | --reload] [--no-wallpaper]"
+        die "usage: $0 [--new | --reload | --my_collection | --bing | --waifu [tags] | --file <path>] [--no-wallpaper]"
         ;;
 esac
 
@@ -78,6 +110,17 @@ if [[ -n "${WALLPAPER:-}" && -f "$WALLPAPER" ]]; then
     printf '%s\n' "$WALLPAPER" > "$STATE"
     if (( SET_WALLPAPER )) && command -v feh >/dev/null; then
         feh --bg-fill "$WALLPAPER"
+        # fetch_wallpaper.sh tracks which image is on which output separately,
+        # and reads it back to leave other screens alone. One image just went
+        # onto all of them, so say so - otherwise a later --monitor run would
+        # restore a stale per-screen split nobody asked for.
+        if command -v xrandr >/dev/null; then
+            : > "$CACHE/wallpapers"
+            xrandr --listmonitors 2>/dev/null | awk 'NR > 1 { print $NF }' |
+                while read -r out; do
+                    [[ -n "$out" ]] && printf '%s\t%s\n' "$out" "$WALLPAPER" >> "$CACHE/wallpapers"
+                done
+        fi
     fi
 else
     # No wallpaper anywhere. Everything below still needs colours to exist, so

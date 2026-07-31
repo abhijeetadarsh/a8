@@ -166,6 +166,22 @@ how your live config has drifted.
 The trade-off: adding a **new file** to `dotfiles/` needs a re-stow before it
 appears in `$HOME`.
 
+### Includes in a symlinked config must be absolute
+
+i3 resolves the config path with `realpath()` before handling `include`, so a
+*relative* include inside a symlinked config is looked up next to the symlink's
+**target** - `dotfiles/.config/i3/` - and never next to the symlink itself.
+Every generated file is written to `~/.config/i3/`, so `include colors.conf`
+found nothing. i3 does not treat a missing include as an error, so this failed
+in complete silence: no config error, no message, just window colours and
+workspace-to-monitor assignments that quietly never applied.
+
+Both i3 includes are therefore written `include ~/.config/i3/<file>`.
+
+kitty and rofi resolve their includes against the path as given, not the
+resolved one, so `include current-theme.conf` and `@import "colors.rasi"` are
+fine as they are. i3 is the only one that needs the absolute form.
+
 ```sh
 stow --dir=~/arch-setup --target=$HOME --restow --no-folding dotfiles
 ```
@@ -313,6 +329,19 @@ accepted, exits 0, and **changes nothing**: `--auto` picks the preferred mode
 Outputs in the file that are not plugged in are skipped, and anything
 connected but unlisted is appended on the right - so the same file works
 docked and undocked. Delete it to go back to auto-detection.
+
+### There is no per-monitor DPI
+
+`Xft.dpi` is a property of the display, not of an output. There is one value
+and every app reads it, so two screens of different pixel density cannot both
+be right. Per-monitor scaling is one of the things Wayland exists to fix.
+
+`xrandr --scale` looks like a way around it - render an output at a multiple
+of its resolution and let the GPU resample onto the panel - but it is not
+worth the trouble here. It resamples rather than redraws, so text goes soft;
+and `--right-of` ignores the transform, so a scaled screen silently overlaps
+the next one by the difference. Set `Xft.dpi` to a value that is a reasonable
+compromise across your screens instead, and adjust per-app font sizes.
 
 ### Why each workspace gets exactly one output
 
