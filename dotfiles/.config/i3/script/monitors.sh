@@ -349,6 +349,23 @@ for o in "${ORDERED[@]}"; do
             )" >&2
             unset 'RATE[$o]'
         fi
+
+        # A rate on its own has to be pinned to an explicit resolution.
+        #
+        # `--output X --auto --rate 120` is accepted by xrandr, exits 0, and
+        # changes nothing: --auto picks the preferred mode *and* its default
+        # rate, and the --rate beside it is ignored. Only `--mode WxH --rate R`
+        # actually switches the rate. So resolve the preferred resolution here
+        # and ask for it by name.
+        if [[ -n "${RATE[$o]:-}" && -z "${MODE[$o]:-}" ]]; then
+            if [[ -n "$res" ]]; then
+                MODE["$o"]="$res"
+            else
+                printf 'monitors: %s: cannot tell which resolution it prefers, dropping the %s Hz request\n' \
+                    "$o" "${RATE[$o]}" >&2
+                unset 'RATE[$o]'
+            fi
+        fi
     fi
 done
 

@@ -1,0 +1,42 @@
+# monitor-order - the desktop's physical layout, read by script/monitors.sh
+#
+# One output per line, in the order they sit LEFT TO RIGHT:
+#
+#     # output   resolution   rate   flags
+#     HDMI-1     2560x1440    144    primary
+#     eDP-1      1920x1080    60
+#
+# Only the output name is required. `xrandr --query | grep " connected"` lists
+# the names, and `script/monitors.sh --modes` lists what each one can do.
+#
+# Position, primary and mode are three separate things:
+#
+#   position   the order of these lines. This alone decides the workspace
+#              split - 1-5 on the left screen, 6-10 on the right - so the
+#              number keys walk across the desk in the order the screens sit.
+#   primary    the `primary` flag. One output. It does NOT move a screen and
+#              does NOT change which workspaces it gets; it is what apps mean
+#              when they ask for "the main screen". Defaults to the leftmost.
+#   mode       resolution and refresh rate. Omit to use whatever the screen
+#              says it prefers.
+#
+# Resolution may carry the rate (2560x1440@144), and `-` or `auto` keeps the
+# preferred resolution while still setting a rate or a flag:
+#
+#     eDP-1      -            48
+#     HDMI-1     auto         -      primary
+#
+# Outputs listed here but not plugged in are skipped, and anything connected
+# but not listed is appended on the right - so one file covers docked and
+# undocked. With every line commented out, as it ships, everything is
+# auto-detected: internal panel first, then whatever xrandr reports.
+#
+# This is the durable place to put a layout. monitors.sh runs with no
+# arguments on every i3 start and every `i3-msg reload`, so a one-off
+# `monitors.sh --rate HDMI-1=120` lasts only until the next reload - whereas a
+# line in here is re-applied every time.
+#
+# Uncomment and edit:
+#
+# eDP-1      1920x1080    60     primary
+# HDMI-1     1920x1080    120

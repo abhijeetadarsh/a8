@@ -216,8 +216,10 @@ desk in the order the screens physically sit. Marking a screen primary does
 **not** move it and does **not** give it workspaces 1-5; it is what apps mean
 when they ask for "the main screen".
 
-Everything lives in one file, `~/.config/i3/monitor-order`, one output per
-line, left to right:
+Everything lives in one file, `~/.config/i3/monitor-order`. It ships with every
+line commented out - which is why the desktop auto-detects until you edit it -
+and the format is documented inside the file itself. One output per line, left
+to right:
 
 ```
 # output   resolution   rate   flags
@@ -261,6 +263,11 @@ monitors.sh --rate eDP-1=60                    # apply once
 `--modes` is where to start - it lists every resolution and rate per output, so
 you can see what is actually available before writing it into the file.
 
+These are **one-off**. `monitors.sh` runs with no arguments on every i3 start
+and every `i3-msg reload` - and `theme_init.sh` reloads i3 - so a layout set
+from the command line lasts until the next reload. The file is the durable
+place to put one.
+
 A mode a screen cannot do is **refused before xrandr sees it**, with the
 supported list printed, and that screen falls back to its preferred mode:
 
@@ -273,6 +280,12 @@ This matters because xrandr fails *quietly*: hand it a mode the hardware does
 not have and you get a dark screen and nothing on stdout. If the layout is
 refused anyway, the whole thing is retried with preferred modes - a wrong
 refresh rate beats a session with no working screen.
+
+A rate given without a resolution is pinned to the screen's preferred
+resolution before xrandr sees it, because `--output X --auto --rate 120` is
+accepted, exits 0, and **changes nothing**: `--auto` picks the preferred mode
+*and* its default rate, and ignores the `--rate` next to it. Only
+`--mode WxH --rate R` actually switches the rate.
 
 Outputs in the file that are not plugged in are skipped, and anything
 connected but unlisted is appended on the right - so the same file works
