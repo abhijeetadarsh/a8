@@ -95,6 +95,7 @@ PKGS_I3=(
     # conflicting, so installing both just fails.
     xss-lock              # i3 config: lock on suspend
     dex                   # i3 config: exec dex --autostart
+    autotiling            # i3 config: spiral layout, i3 has no such mode itself
     picom                 # compositor
     polybar               # the bar
     rofi                  # launcher + powermenu

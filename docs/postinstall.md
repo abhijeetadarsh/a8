@@ -269,6 +269,32 @@ favour of the module and warns about every one it finds.
 Applets that start before the bar still appear: they watch for the tray to show
 up and dock when it does, so the startup order does not matter.
 
+## Spiral tiling
+
+New windows split the focused container along its **longer** axis, so each one
+halves the largest free space and the layout spirals:
+
+```
++-------------------+---------+
+|                   |    2    |
+|         1         +----+----+
+|                   | 3  | 4  |
++-------------------+----+----+
+```
+
+i3 has no such layout. Its model is nested horizontal and vertical splits, and
+a new window always splits the same way, which is what makes everything stack
+down one axis. `autotiling` watches the focus and sets the split direction to
+match the container's shape - wide splits vertically, tall splits horizontally.
+
+It is in the official repos, so it is a package rather than a script in here,
+and it runs from `exec_always` - not `exec` - because it has to come back after
+an i3 restart or the layout quietly reverts to splitting one way forever.
+
+`$mod+h`/`$mod+v` stay unbound, since the direction is chosen for you.
+`$mod+e`, `$mod+s` and `$mod+w` still switch a container between split, stacked
+and tabbed.
+
 ### The bar's menus
 
 There is no launcher icon on the bar. `$mod+d` opens the same rofi launcher,

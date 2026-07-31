@@ -43,6 +43,19 @@ exec_always --no-startup-id $HOME/.config/i3/script/monitors.sh
 
 # Start XDG autostart .desktop files using dex. See also
 # https://wiki.archlinux.org/index.php/XDG_Autostart
+# Spiral / fibonacci tiling.
+#
+# i3 has no such layout - its model is nested horizontal and vertical splits,
+# and a new window always splits the focused container the same way, which is
+# what makes everything stack down one axis. autotiling watches the focus and
+# sets the split to whichever axis of the focused container is longer, so each
+# new window halves the largest free space: wide container splits vertically,
+# tall one splits horizontally. Repeat that and you get the spiral.
+#
+# exec_always, not exec: it has to come back after an i3 restart or the layout
+# quietly reverts to splitting one way forever.
+exec_always --no-startup-id autotiling
+
 exec --no-startup-id dex --autostart --environment i3
 
 # xss-lock grabs a logind suspend inhibit lock and locks the screen before
@@ -129,6 +142,8 @@ bindsym $mod+Shift+l move right
 # bindsym $mod+Shift+Up move up
 # bindsym $mod+Shift+Right move right
 
+# Split direction is chosen automatically - see the autotiling exec below - so
+# these are left unbound. $mod+h and $mod+v are "focus left" and nothing.
 # split in horizontal orientation
 # bindsym $mod+h split h
 
