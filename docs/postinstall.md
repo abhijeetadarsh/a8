@@ -261,6 +261,29 @@ No extra packages: `nmcli` comes from `networkmanager`, `rofi` and `libnotify`
 are already in the i3 group, and `nm-connection-editor` is a hard dependency of
 `network-manager-applet`.
 
+### The system tray
+
+`nm-applet` and `blueman-applet` are started by the i3 config, and both are
+*only* a tray icon - that is their entire interface. There was no tray, so both
+ran as background processes nobody could reach, and **bluetooth had no UI at
+all**.
+
+The tray is the `tray` module in `user_modules.ini`, and it goes on exactly one
+bar. `_NET_SYSTEM_TRAY_S0` is a single X selection: with one polybar per
+monitor, every instance asking for it would race and the losers would log an
+error. So `launch.sh` starts `bar/main-tray` on the primary output and
+`bar/main` everywhere else - the same bar, `inherit`ed, with the module added.
+
+It has to be a separate bar section rather than an env-var in `modules-right`:
+polybar does not expand `${env:...}` inside a module list, it takes the whole
+token as a module name and disables it.
+
+Nor the bar-level `tray-position` settings - polybar 3.7 deprecates those in
+favour of the module and warns about every one it finds.
+
+Applets that start before the bar still appear: they watch for the tray to show
+up and dock when it does, so the startup order does not matter.
+
 ## Monitors
 
 `i3/script/monitors.sh` detects what is connected, arranges it left to right,

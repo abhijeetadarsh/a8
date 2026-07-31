@@ -32,9 +32,22 @@ if (( ${#MONITORS[@]} == 0 )); then
     exit 0
 fi
 
+# The tray goes on exactly one bar. _NET_SYSTEM_TRAY_S0 is a single X selection,
+# so if every instance asked for it they would race and the losers would log an
+# error. bar/main-tray is bar/main with the tray module added, and only the
+# primary output gets it - the primary as xrandr reports it, or the first bar
+# started when nothing is marked primary.
+#
+# This is what makes nm-applet and blueman-applet visible at all: they dock an
+# icon into the tray and have no other interface.
+TRAY_ON="$(xrandr --query 2>/dev/null | awk '/ connected primary/ { print $1; exit }')"
+[[ -z "$TRAY_ON" ]] && TRAY_ON="${MONITORS[0]}"
+
 for m in "${MONITORS[@]}"; do
     [[ -z "$m" ]] && continue
-    MONITOR="$m" polybar -q main -c "$DIR/config.ini" &
+    bar=main
+    [[ "$m" == "$TRAY_ON" ]] && bar=main-tray
+    MONITOR="$m" polybar -q "$bar" -c "$DIR/config.ini" &
 done
 
 exit 0
