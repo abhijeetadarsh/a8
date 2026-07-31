@@ -230,6 +230,37 @@ To unlink everything, swap `--restow` for `--delete`.
 - **Fonts** - boxes instead of icons means a font package did not install;
   check `fc-list | grep -i caskaydia`.
 
+## Network, from the bar
+
+The bar's network segment shows whatever is actually connected - the wifi SSID
+with its signal strength, or the name of the wired connection.
+
+| | |
+| --- | --- |
+| left click | the network menu: wifi networks, saved wired profiles, a wifi toggle, disconnect |
+| right click | `nm-connection-editor`, for static addresses, VPNs and editing profiles |
+
+The menu is `polybar/shades/scripts/networkmenu.sh`, driven by rofi with the
+generated palette, so no terminal and no `nmtui`. Everything goes through
+`nmcli`, so connections made here are ordinary NetworkManager profiles - saved,
+and back on their own after a reboot.
+
+Secured networks are joined by asking for the password in a rofi prompt, but
+only when nothing is stored: a network with a saved profile connects on one
+click. Open networks are the ones marked `(open)` - tagging the secured ones
+instead would put a marker on nearly every line.
+
+It is a `custom/script` module rather than polybar's `internal/network`, for a
+reason worth keeping: `internal/network` wants an **interface name**, and
+`interface = wlp2s0` works on exactly one machine. The script asks
+NetworkManager what is carrying traffic, so the same config covers wifi and
+ethernet on any hardware. The example modules in `modules.ini` use
+`interface-type = wireless|wired` for the same reason.
+
+No extra packages: `nmcli` comes from `networkmanager`, `rofi` and `libnotify`
+are already in the i3 group, and `nm-connection-editor` is a hard dependency of
+`network-manager-applet`.
+
 ## Monitors
 
 `i3/script/monitors.sh` detects what is connected, arranges it left to right,
