@@ -235,10 +235,12 @@ is_connected() {
     return 1
 }
 
-WANTED=()
-if [[ -n "${ORDER_OVERRIDE:-}" ]]; then
-    read -r -a WANTED <<< "$ORDER_OVERRIDE"
-elif [[ -f "$ORDER_FILE" ]]; then
+# The file is read for its per-output settings even when --order is given.
+# --order overrides the *ordering*, nothing else: dropping the resolutions and
+# the primary along with it is not what "put HDMI-1 on the left for a moment"
+# should mean, and it is the same per-setting rule --mode and --rate follow.
+FILE_ORDER=()
+if [[ -f "$ORDER_FILE" ]]; then
     while read -r line; do
         line="${line%%#*}"
         # Fields, not one squashed token: a line may carry a mode and flags.
@@ -246,7 +248,7 @@ elif [[ -f "$ORDER_FILE" ]]; then
         (( ${#fields[@]} )) || continue
 
         out="${fields[0]}"
-        WANTED+=("$out")
+        FILE_ORDER+=("$out")
 
         # The command line overrides the file, per setting rather than per
         # line: --rate on its own must not throw away the resolution the file
@@ -274,11 +276,29 @@ elif [[ -f "$ORDER_FILE" ]]; then
     done < "$ORDER_FILE"
 fi
 
+WANTED=()
+if [[ -n "${ORDER_OVERRIDE:-}" ]]; then
+    read -r -a WANTED <<< "$ORDER_OVERRIDE"
+else
+    WANTED=("${FILE_ORDER[@]:-}")
+fi
+
 ORDERED=()
 for o in "${WANTED[@]:-}"; do
     # Silently skip what is in the list but not plugged in: that is the whole
     # point of the file surviving an undock.
-    [[ -n "$o" ]] && is_connected "$o" && ORDERED+=("$o")
+    [[ -n "$o" ]] && is_connected "$o" || continue
+
+    # A name listed twice would be placed --right-of itself and would collect
+    # two sets of workspaces. First mention wins; say so, because a repeat is
+    # a typo rather than an intention.
+    dup=0
+    for p in "${ORDERED[@]:-}"; do [[ "$p" == "$o" ]] && { dup=1; break; }; done
+    if (( dup )); then
+        printf 'monitors: %s is listed more than once, ignoring the repeat\n' "$o" >&2
+        continue
+    fi
+    ORDERED+=("$o")
 done
 
 # Anything connected that the order file did not mention goes on the right.
@@ -407,14 +427,73 @@ describe() {
     printf '%s' "$res"
 }
 
+# What is on screen right now, straight from xrandr, as
+# "xoffset<TAB>output<TAB>WxH<TAB>rate" sorted left to right by x offset.
+#
+# This is deliberately not derived from the plan. --print used to show only
+# what it *would* do, which reads as a statement about the screens in front of
+# you - so after a one-off `--order`, the plan and the desk disagreed and the
+# output gave no hint which was which.
+current_layout() {
+    local o geo res x rate
+    for o in "${CONNECTED[@]}"; do
+        geo="$(printf '%s\n' "$XQUERY" | awk -v o="$o" '
+            $1 == o { for (i = 3; i <= NF; i++)
+                          if ($i ~ /^[0-9]+x[0-9]+\+-?[0-9]+\+-?[0-9]+$/) { print $i; exit } }')"
+        [[ -n "$geo" ]] || continue          # connected but not enabled
+        res="${geo%%+*}"
+        x="${geo#*+}"; x="${x%%+*}"
+        # The active rate is the one xrandr marks with '*'.
+        rate="$(printf '%s\n' "$XQUERY" | awk -v o="$o" '
+            $1 == o { f = 1; next }
+            f && /^[A-Za-z0-9_.-]+ (dis)?connected/ { exit }
+            f && /\*/ { for (i = 2; i <= NF; i++)
+                            if ($i ~ /\*/) { gsub(/[*+]/, "", $i); print $i; exit } }')"
+        printf '%s\t%s\t%s\t%s\n' "$x" "$o" "$res" "${rate:-?}"
+    done | sort -n
+}
+
+current_primary() {
+    printf '%s\n' "$XQUERY" | awk '/ connected primary/ { print $1; exit }'
+}
+
 if (( PRINT )); then
-    printf 'left to right: %s\n' "${ORDERED[*]}"
-    printf 'primary:       %s\n' "$PRIMARY"
+    if [[ -n "${ORDER_OVERRIDE:-}" ]]; then
+        src="the --order given on the command line"
+    elif [[ -f "$ORDER_FILE" ]]; then
+        src="$ORDER_FILE"
+    else
+        src="auto-detection (no $ORDER_FILE)"
+    fi
+
+    printf 'would apply, from %s:\n' "$src"
+    printf '  left to right: %s\n' "${ORDERED[*]}"
+    printf '  primary:       %s\n' "$PRIMARY"
     for o in "${ORDERED[@]}"; do
-        printf '  %-10s %s%s\n' "$o" "$(describe "$o")" \
+        printf '    %-10s %s%s\n' "$o" "$(describe "$o")" \
             "$([[ "$o" == "$PRIMARY" ]] && printf '   [primary]')"
     done
-    for ws in {1..10}; do printf '  ws %-2s -> %s\n' "$ws" "${ASSIGN[$ws]}"; done
+    for ws in {1..10}; do printf '    ws %-2s -> %s\n' "$ws" "${ASSIGN[$ws]}"; done
+
+    now_order=()
+    while IFS=$'\t' read -r x o res rate; do
+        now_order+=("$o")
+        now_desc[${#now_order[@]}]="$(printf '%-10s %s @ %sHz' "$o" "$res" "$rate")"
+    done < <(current_layout)
+
+    printf '\non screen now:\n'
+    printf '  left to right: %s\n' "${now_order[*]}"
+    printf '  primary:       %s\n' "$(current_primary)"
+    for i in "${!now_order[@]}"; do
+        printf '    %s%s\n' "${now_desc[$((i + 1))]}" \
+            "$([[ "${now_order[$i]}" == "$(current_primary)" ]] && printf '   [primary]')"
+    done
+
+    if [[ "${now_order[*]}" != "${ORDERED[*]}" || "$(current_primary)" != "$PRIMARY" ]]; then
+        printf '\nThese differ. What is on screen came from an earlier run;\n'
+        printf 'the plan above is what the next i3 reload will put back.\n'
+        printf 'To keep an arrangement, put it in %s.\n' "$ORDER_FILE"
+    fi
     exit 0
 fi
 

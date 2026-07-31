@@ -268,6 +268,29 @@ and every `i3-msg reload` - and `theme_init.sh` reloads i3 - so a layout set
 from the command line lasts until the next reload. The file is the durable
 place to put one.
 
+`--order` overrides the *ordering only*. The file is still read for each
+screen's resolution, rate and `primary` flag, so putting a screen on the left
+for a moment does not quietly drop everything else you configured.
+
+Which is why `--print` shows two blocks - what it *would* apply, and what is
+actually on screen right now:
+
+```
+would apply, from ~/.config/i3/monitor-order:
+  left to right: eDP-1 HDMI-1
+  primary:       eDP-1
+...
+on screen now:
+  left to right: HDMI-1 eDP-1
+  primary:       HDMI-1
+...
+These differ. What is on screen came from an earlier run;
+the plan above is what the next i3 reload will put back.
+```
+
+They differ exactly when you have applied something one-off that the file does
+not say. The plan is what wins at the next reload.
+
 A mode a screen cannot do is **refused before xrandr sees it**, with the
 supported list printed, and that screen falls back to its preferred mode:
 

@@ -38,5 +38,5 @@
 #
 # Uncomment and edit:
 #
-# eDP-1      1920x1080    60     primary
-# HDMI-1     1920x1080    120
+eDP-1      1920x1080    60     primary
+HDMI-1     1920x1080    120
