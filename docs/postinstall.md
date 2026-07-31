@@ -232,36 +232,21 @@ To unlink everything, swap `--restow` for `--delete`.
 
 ## Network, from the bar
 
-The bar's network segment shows whatever is actually connected - the wifi SSID
-with its signal strength, or the name of the wired connection.
+Click the network icon in the tray. `nm-applet` lists the wifi networks in
+range, asks for a password when it needs one, and handles wired connections and
+VPNs - no terminal and no `nmtui`.
 
-| | |
-| --- | --- |
-| left click | the network menu: wifi networks, saved wired profiles, a wifi toggle, disconnect |
-| right click | `nm-connection-editor`, for static addresses, VPNs and editing profiles |
+There is deliberately no second network module on the bar. One briefly existed,
+a rofi menu driven by `nmcli`, and it did the same job as the tray icon that was
+already running: two ways to join a network, one of them a reimplementation of
+the other. The tray is the one that comes with NetworkManager and handles the
+cases a menu should not try to, so it is the one that stayed.
 
-The menu is `polybar/shades/scripts/networkmenu.sh`, driven by rofi with the
-generated palette, so no terminal and no `nmtui`. Everything goes through
-`nmcli`, so connections made here are ordinary NetworkManager profiles - saved,
-and back on their own after a reboot.
+The example modules in `modules.ini` use `interface-type = wireless|wired`
+rather than an interface name - `interface = wlp2s0` works on exactly one
+machine.
 
-Secured networks are joined by asking for the password in a rofi prompt, but
-only when nothing is stored: a network with a saved profile connects on one
-click. Open networks are the ones marked `(open)` - tagging the secured ones
-instead would put a marker on nearly every line.
-
-It is a `custom/script` module rather than polybar's `internal/network`, for a
-reason worth keeping: `internal/network` wants an **interface name**, and
-`interface = wlp2s0` works on exactly one machine. The script asks
-NetworkManager what is carrying traffic, so the same config covers wifi and
-ethernet on any hardware. The example modules in `modules.ini` use
-`interface-type = wireless|wired` for the same reason.
-
-No extra packages: `nmcli` comes from `networkmanager`, `rofi` and `libnotify`
-are already in the i3 group, and `nm-connection-editor` is a hard dependency of
-`network-manager-applet`.
-
-### The system tray
+## The system tray
 
 `nm-applet` and `blueman-applet` are started by the i3 config, and both are
 *only* a tray icon - that is their entire interface. There was no tray, so both
@@ -283,6 +268,16 @@ favour of the module and warns about every one it finds.
 
 Applets that start before the bar still appear: they watch for the tray to show
 up and dock when it does, so the startup order does not matter.
+
+### Why the icon font is the "Propo" face
+
+`font-1` is `CaskaydiaCove Nerd Font Propo`, not `CaskaydiaCove Nerd Font`.
+
+The plain face draws its icons double-width, but polybar advances one cell for
+them, so the left half of every icon was cut off - a speaker with no body, a
+battery with no outline, a clock with no rim. The `Mono` face fixes the clipping
+by squeezing icons into one cell, which makes them noticeably small. `Propo`
+gives each icon its natural width, which is what the bar wants.
 
 ## Monitors
 
