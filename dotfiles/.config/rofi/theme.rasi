@@ -1,81 +1,113 @@
+/*
+ * rofi theme - layout and typography here, colours in colors.rasi.
+ *
+ * colors.rasi is generated from the wallpaper by theme_engine on every
+ * theme_init.sh run, so it is deliberately not in the repo. If rofi complains
+ * it cannot find the import, run ~/.config/i3/script/theme_init.sh once.
+ */
+
+@import "colors.rasi"
+
 configuration {
-	display-drun: "Applications:";
-	display-window: "Windows:";
-	drun-display-format: "{icon} {name}";
-	modi: "window,run,drun";
+	display-drun:   "";
+	display-run:    "";
+	display-window: "";
+	drun-display-format: "{name}";
+	modi: "drun,run,window";
 	show-icons: true;
 }
 
 * {
-	font: "Jetbrains Mono 12";
-	fg: #f8f8f2;
-	bg: #282a36;
-	active-bg: #44475a;
-	urgent-bg: #ff5555;
-	urgent-fg: #282a36;
+	font: "CaskaydiaCove Nerd Font 11";
 
-	selected-background: @active-bg;
-	selected-urgent-background: @urgent-bg;
-	selected-active-background: @active-bg;
-	separatorcolor: #6272a4;
-	bordercolor: #6272a4;
+	background-color: transparent;
+	text-color:       @fg;
 
-	border: 0;
-	margin: 0;
+	border:  0;
+	margin:  0;
 	padding: 0;
 	spacing: 0;
 }
 
 window {
-	width: 45%;
-}
-
-element {
-	padding: 12;
-	text-color: @fg;
+	width:            42%;
 	background-color: @bg;
-}
-
-element selected {
-	background-color: @active-bg;
-}
-
-element-text {
-	background-color: inherit;
-	text-color: inherit;
-	vertical-align: 0.5;
-}
-
-element-icon {
-	size: 30;
-	background-color: transparent;
-}
-
-entry {
-	background-color: @bg;
-	padding: 12;
-	text-color: @fg;
-}
-
-inputbar {
-	children: [prompt, entry];
-}
-
-listview {
-	background-color: @bg;
-	columns: 1;
-	lines: 8;
+	border:           2px;
+	border-color:     @accent;
+	border-radius:    8px;
+	padding:          0;
 }
 
 mainbox {
-	background-color: @bg;
-	children: [inputbar, listview];
+	children: [ inputbar, listview ];
+	padding:  8px;
+	spacing:  8px;
+}
+
+inputbar {
+	children:         [ prompt, entry ];
+	background-color: @bg-bar;
+	border-radius:    6px;
+	padding:          10px 12px;
+	spacing:          10px;
 }
 
 prompt {
-	background-color: @bg;
-	enable: true;
-	padding: 12 0 0 12;
-	text-color: @fg;
+	text-color:     @accent;
+	vertical-align: 0.5;
 }
 
+entry {
+	placeholder:       "search";
+	placeholder-color: @fg-alt;
+	vertical-align:    0.5;
+}
+
+listview {
+	columns:      1;
+	lines:        9;
+	scrollbar:    false;
+	fixed-height: false;
+	spacing:      2px;
+}
+
+element {
+	padding:       8px 12px;
+	spacing:       10px;
+	border-radius: 6px;
+}
+
+element normal.normal    { text-color: @fg; }
+element alternate.normal { text-color: @fg; }
+element normal.urgent    { text-color: @urgent; }
+element alternate.urgent { text-color: @urgent; }
+
+element selected.normal {
+	background-color: @accent;
+	text-color:       @bg;
+}
+
+element selected.urgent {
+	background-color: @urgent;
+	text-color:       @bg;
+}
+
+element-icon {
+	size:           24px;
+	vertical-align: 0.5;
+}
+
+element-text {
+	text-color:     inherit;
+	vertical-align: 0.5;
+}
+
+message {
+	background-color: @bg-bar;
+	border-radius:    6px;
+	padding:          10px;
+}
+
+textbox {
+	text-color: @fg;
+}

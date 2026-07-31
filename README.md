@@ -24,12 +24,13 @@ arch-setup/
 │   └── postinstall.sh        # desktop + apps + dotfiles (run after first boot)
 ├── dotfiles/                 # the i3 rice, stowed into $HOME
 │   ├── .bashrc  .Xresources  .gitconfig
-│   └── .config/{i3,polybar,rofi,picom,alacritty,kitty,nvim,gtk-3.0,gtk-4.0}
+│   └── .config/{i3,polybar,rofi,dunst,picom,kitty,ranger,nvim,gtk-3.0,gtk-4.0}
 ├── examples/
 │   └── answers.example.json  # a saved installer answer set (for --config)
 ├── docs/
 │   ├── install.md            # step-by-step install from the ISO
-│   └── postinstall.md        # what postinstall.sh does, and how stow works
+│   ├── postinstall.md        # what postinstall.sh does, and how stow works
+│   └── theming.md            # how the wallpaper colours the whole desktop
 ├── LICENSE
 └── README.md
 ```

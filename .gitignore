@@ -16,3 +16,14 @@ __pycache__/
 # editor / OS cruft
 .DS_Store
 *.swp
+
+# palette files written by theme_engine on every wallpaper change. They land
+# next to the config that includes them, which for stowed dirs means inside
+# this tree - they are output, not source.
+dotfiles/.config/polybar/shades/color/
+dotfiles/.config/rofi/colors.rasi
+dotfiles/.config/i3/colors.conf
+dotfiles/.config/kitty/current-theme.conf
+dotfiles/.config/dunst/dunstrc.d/
+dotfiles/.config/gtk-3.0/gtk.css
+dotfiles/.config/gtk-4.0/gtk.css

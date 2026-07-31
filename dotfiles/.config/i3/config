@@ -11,6 +11,17 @@
 
 set $mod Mod4
 
+# Colours come from the wallpaper. theme_init.sh regenerates colors.conf on
+# every startup and every wallpaper change; it defines $base, $accent, $text
+# and the client.* block, so it has to be included before anything uses them.
+# (Generated file - it is not in the repo. Run theme_init.sh if it is missing.)
+include colors.conf
+
+# Which workspace lives on which monitor. monitors.sh regenerates this
+# from whatever is plugged in, so the same config works docked and
+# undocked. (Generated - run monitors.sh if it is missing.)
+include monitors.conf
+
 # Font for window titles. Will also be used by the bar unless a different font
 # is used in the bar {} block below.
 font pango:Fantasque Sans Mono 12
@@ -19,6 +30,10 @@ font pango:Fantasque Sans Mono 12
 # This font is widely installed, provides lots of unicode glyphs, right-to-left
 # text rendering and scalability on retina/hidpi displays (thanks to pango).
 #font pango:DejaVu Sans Mono 8
+
+# Arrange the monitors and regenerate monitors.conf. This runs before anything
+# places a window, so workspaces land on the right screen from the first frame.
+exec_always --no-startup-id $HOME/.config/i3/script/monitors.sh
 
 # Start XDG autostart .desktop files using dex. See also
 # https://wiki.archlinux.org/index.php/XDG_Autostart
@@ -53,8 +68,28 @@ tiling_drag modifier titlebar
 # bindsym $mod+Return exec i3-sensible-terminal
 bindsym $mod+Return exec --no-startup-id kitty
 
+# file manager
+bindsym $mod+n exec --no-startup-id kitty -e ranger
+
 # kill focused window
 bindsym $mod+Shift+q kill
+
+# re-detect monitors after plugging a screen in, then reload
+bindsym $mod+Shift+m exec --no-startup-id "$HOME/.config/i3/script/monitors.sh && i3-msg reload && $HOME/.config/polybar/shades/launch.sh"
+
+# move focus / the focused window between monitors
+bindsym $mod+comma focus output left
+bindsym $mod+period focus output right
+bindsym $mod+Shift+comma move container to output left; focus output left
+bindsym $mod+Shift+period move container to output right; focus output right
+
+# reshuffle the wallpaper and re-theme the whole desktop from it
+bindsym $mod+Shift+w exec --no-startup-id $HOME/.config/i3/script/theme_init.sh --my_collection
+bindsym $mod+Ctrl+Shift+w exec --no-startup-id $HOME/.config/i3/script/theme_init.sh --bing
+
+# fetch a new wallpaper from waifu.im (falls back to the local library offline)
+bindsym $mod+Ctrl+w exec --no-startup-id $HOME/.config/i3/script/fetch_wallpaper.sh
+bindsym $mod+Ctrl+Shift+p exec --no-startup-id $HOME/.config/i3/script/fetch_wallpaper.sh --per-monitor
 
 # start dmenu (a program launcher)
 # bindsym $mod+d exec --no-startup-id dmenu_run
@@ -114,18 +149,18 @@ bindsym $mod+a focus parent
 # focus the child container
 #bindsym $mod+d focus child
 
-# Define names for default workspaces for which we configure key bindings later on.
-# We use variables to avoid repeating the names in multiple places.
-set $ws1 "1: "
-set $ws2 "2: 󰨞"
-set $ws3 "3: 󰈹"
-set $ws4 "4: "
-set $ws5 "5: 󰢹"
+# Workspaces are plain numbers. Their monitor assignment lives in the
+# generated monitors.conf, included above.
+set $ws1 "1"
+set $ws2 "2"
+set $ws3 "3"
+set $ws4 "4"
+set $ws5 "5"
 set $ws6 "6"
 set $ws7 "7"
 set $ws8 "8"
-set $ws9 "9: "
-set $ws10 "10: "
+set $ws9 "9"
+set $ws10 "10"
 
 # switch to workspace
 bindsym $mod+1 workspace number $ws1
@@ -218,14 +253,8 @@ exec_always --no-startup-id $HOME/.config/i3/script/theme_init.sh --my_collectio
 # Remove border and titles
 for_window [class=".*"] border pixel 2
 
-# Color scheme
-# class                 border      bground    text       indicator    child_border
-client.background       #6E2C00
-client.focused          #FFFFFF     #6E2C00    #FFFFFF    #C78400      #C78400
-client.unfocused        #FFFFFF     #6E2C00    #D7A222    #7A2E00      #7A2E00
-client.focused_inactive #FFFFFF     #6E2C00    #FFFFFF    #B76300      #B76300
-client.urgent           #FFFFFF     #6E2C00    #FFFFFF    #AD4F00      #AD4F00
-client.placeholder      #FFFFFF     #6E2C00    #FFFFFF    #6E2C00      #6E2C00
+# The client.* colour scheme lives in the generated colors.conf, included at
+# the top of this file.
 
 
 # Screenshots
@@ -240,10 +269,12 @@ bindsym Ctrl+Print exec --no-startup-id maim | xclip -selection clipboard -t ima
 bindsym Ctrl+$mod+Print exec --no-startup-id maim --window $(xdotool getactivewindow) | xclip -selection clipboard -t image/png
 bindsym Ctrl+Shift+Print exec --no-startup-id maim --select | xclip -selection clipboard -t image/png
 
-# GTK dark theme
-exec_always --no-startup-id env GTK_THEME=Adwaita:dark
+# GTK theming is settings.ini (dark Adwaita) plus the generated gtk.css, which
+# repaints Adwaita's accent to match the wallpaper. Nothing to exec here - the
+# old `env GTK_THEME=...` line set a variable in a shell that exited
+# immediately, so it never reached a single GTK app.
 
-# Lock screen with i3lock using Dracula theme
+# Lock screen (colours come from the generated palette)
 # bindsym $mod+l exec ~/.config/i3/i3lock-color.sh
 
 # Auto lock
