@@ -198,27 +198,81 @@ runs it at startup; `$mod+Shift+m` re-runs it after plugging a screen in.
 | monitors | workspaces |
 | --- | --- |
 | 1 | all ten on it |
-| 2 | 1-5 on the first, 6-10 on the second |
-| 3+ | divided evenly, in order |
+| 2 | 1-5 on the left, 6-10 on the right |
+| 3+ | divided evenly, left to right |
 
-### Changing the monitor order
+### Position, primary and mode
 
-The first monitor in the order is the primary and gets workspaces 1-5. By
-default that is the internal panel (`eDP-*`/`LVDS-*`), then whatever else
-xrandr reports. To choose explicitly, list the outputs left to right:
+These are three separate things, and setting one does not change the others:
+
+| | what it means | where it comes from |
+| --- | --- | --- |
+| **position** | where a screen sits left to right | the order of the lines |
+| **primary** | xrandr's `--primary` flag, one output | the `primary` flag |
+| **mode** | resolution and refresh rate | the resolution/rate columns |
+
+Position is what decides the workspace split - the number keys walk across the
+desk in the order the screens physically sit. Marking a screen primary does
+**not** move it and does **not** give it workspaces 1-5; it is what apps mean
+when they ask for "the main screen".
+
+Everything lives in one file, `~/.config/i3/monitor-order`, one output per
+line, left to right:
+
+```
+# output   resolution   rate   flags
+HDMI-1     2560x1440    144    primary
+eDP-1      1920x1080    60
+```
+
+Only the name is required. So the old bare list still works:
 
 ```sh
 printf 'HDMI-1\neDP-1\n' > ~/.config/i3/monitor-order
 ~/.config/i3/script/monitors.sh          # apply now
 ```
 
-`xrandr --query | grep " connected"` lists the names. To try an order without
-committing to it:
+That file says: HDMI-1 on the left running 2560x1440 at 144 Hz **and** primary,
+eDP-1 to its right at 1920x1080/60. Workspaces 1-5 land on HDMI-1 because it is
+leftmost, not because it is primary.
+
+Resolution may carry the rate (`2560x1440@144`), and `-` or `auto` keeps the
+screen's preferred resolution while still setting a rate or a flag:
+
+```
+eDP-1      -            47.99          # preferred resolution, 48 Hz
+HDMI-1     auto         -       primary
+```
+
+### Trying it without committing
+
+Every setting has a flag, and flags beat the file per setting - `--rate` alone
+does not throw away the resolution the file gives for the same screen.
 
 ```sh
-~/.config/i3/script/monitors.sh --print --order "HDMI-1 eDP-1"   # preview
-~/.config/i3/script/monitors.sh --order "HDMI-1 eDP-1"           # apply once
+monitors.sh --modes                            # what each screen supports
+monitors.sh --print                            # the plan, change nothing
+monitors.sh --print --order "HDMI-1 eDP-1"     # preview a different order
+monitors.sh --primary HDMI-1                   # apply once
+monitors.sh --mode HDMI-1=2560x1440@144        # apply once
+monitors.sh --rate eDP-1=60                    # apply once
 ```
+
+`--modes` is where to start - it lists every resolution and rate per output, so
+you can see what is actually available before writing it into the file.
+
+A mode a screen cannot do is **refused before xrandr sees it**, with the
+supported list printed, and that screen falls back to its preferred mode:
+
+```
+monitors: HDMI-1 cannot do 3840x2160 - using its preferred mode
+monitors:   it supports: 1920x1080 1680x1050 1280x1024 1440x900 1280x720 ...
+```
+
+This matters because xrandr fails *quietly*: hand it a mode the hardware does
+not have and you get a dark screen and nothing on stdout. If the layout is
+refused anyway, the whole thing is retried with preferred modes - a wrong
+refresh rate beats a session with no working screen.
 
 Outputs in the file that are not plugged in are skipped, and anything
 connected but unlisted is appended on the right - so the same file works
