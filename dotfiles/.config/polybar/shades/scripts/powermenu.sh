@@ -58,11 +58,9 @@ case $chosen in
         fi
         ;;
     $lock)
-		if [[ -f /usr/bin/i3lock ]]; then
-			i3lock
-		elif [[ -f /usr/bin/betterlockscreen ]]; then
-			betterlockscreen -l
-		fi
+		# The themed locker, not bare i3lock - same screen $mod+Ctrl+l and
+		# xss-lock give you, with the wallpaper and the generated palette.
+		"$HOME/.config/i3/script/i3lock-color.sh"
         ;;
     $suspend)
 		ans=$(confirm_exit &)

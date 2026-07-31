@@ -269,6 +269,16 @@ favour of the module and warns about every one it finds.
 Applets that start before the bar still appear: they watch for the tray to show
 up and dock when it does, so the startup order does not matter.
 
+### The bar's menus
+
+There is no launcher icon on the bar. `$mod+d` opens the same rofi launcher,
+and an always-visible magnifier that does only that is clutter.
+
+The power menu (the icon at the far right) and its confirmation dialog use the
+same theme as that launcher - same border, same radius, same accent selection -
+so the desktop has one menu style rather than three. Its **Lock** entry runs the
+themed locker, the same screen `$mod+Ctrl+l` and `xss-lock` produce.
+
 ### Why the icon font is the "Propo" face
 
 `font-1` is `CaskaydiaCove Nerd Font Propo`, not `CaskaydiaCove Nerd Font`.

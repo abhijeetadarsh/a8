@@ -1,24 +1,55 @@
-/* Confirm Dialog */
+/* Confirm dialog - the second half of the powermenu flow, so it matches
+ * powermenu.rasi and the launcher rather than being its own thing.
+ *
+ * The old one drew the typed answer in @bg1, a near-background colour on a
+ * background, so you could not see what you were typing. */
 
 @import "colors.rasi"
 
 * {
-    background-color:       @bg;
-    text-color:             @fg;
-	font:				 	"Fantasque Sans Mono 10";
+	font: "CaskaydiaCove Nerd Font 11";
+
+	background-color: transparent;
+	text-color:       @fg;
+
+	border:  0;
+	margin:  0;
+	padding: 0;
+	spacing: 0;
 }
 
 window {
-    width:      			225px;
-    padding:    			25px;
-    border:					1px;
-    border-radius:          0px;
-    border-color:           @bg1;
-    location:               center;
-    y-offset:               -2em;
+	width:            320px;
+	background-color: @bg;
+	border:           2px;
+	border-color:     @accent;
+	border-radius:    8px;
+	padding:          0;
+	location:         center;
+}
+
+mainbox {
+	children: [ inputbar ];
+	padding:  8px;
+}
+
+inputbar {
+	children:         [ prompt, entry ];
+	background-color: @bg-bar;
+	border-radius:    6px;
+	padding:          10px 12px;
+	spacing:          10px;
+}
+
+prompt {
+	text-color:     @accent;
+	vertical-align: 0.5;
 }
 
 entry {
-    expand: 				true;
-    text-color:				@bg1;
+	expand:            true;
+	text-color:        @fg;
+	placeholder:       "y / n";
+	placeholder-color: @fg-alt;
+	vertical-align:    0.5;
 }
