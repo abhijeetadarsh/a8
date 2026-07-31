@@ -45,12 +45,14 @@ exec_always --no-startup-id $HOME/.config/i3/script/monitors.sh
 # https://wiki.archlinux.org/index.php/XDG_Autostart
 exec --no-startup-id dex --autostart --environment i3
 
-# The combination of xss-lock, nm-applet and pactl is a popular choice, so
-# they are included here as an example. Modify as you see fit.
-
-# xss-lock grabs a logind suspend inhibit lock and will use i3lock to lock the
-# screen before suspend. Use loginctl lock-session to lock your screen.
-exec --no-startup-id xss-lock --transfer-sleep-lock -- i3lock --nofork
+# xss-lock grabs a logind suspend inhibit lock and locks the screen before
+# suspend, and `loginctl lock-session` locks it on demand.
+#
+# It runs the themed locker, not bare i3lock: the palette and the wallpaper
+# belong on the screen you actually see most of. --nofork is required - xss-lock
+# tracks the locker as a child, and one that forks away looks like it exited,
+# so the machine would suspend with the screen unlocked.
+exec --no-startup-id xss-lock --transfer-sleep-lock -- $HOME/.config/i3/script/i3lock-color.sh --nofork
 
 # NetworkManager is the most popular way to manage wireless networks on Linux,
 # and nm-applet is a desktop environment-independent system tray GUI for it.
@@ -281,11 +283,14 @@ bindsym Ctrl+Shift+Print exec --no-startup-id maim --select | xclip -selection c
 # old `env GTK_THEME=...` line set a variable in a shell that exited
 # immediately, so it never reached a single GTK app.
 
-# Lock screen (colours come from the generated palette)
-# bindsym $mod+l exec ~/.config/i3/i3lock-color.sh
-
-# Auto lock
-# exec --no-startup-id xautolock -time 30 -locker "~/.config/i3/i3lock-color.sh"
+# Lock screen: the wallpaper with the generated palette on the indicator.
+#
+# This was commented out and pointed at a path the script has never been at -
+# it lives under script/ with everything else - so there was no lock key at
+# all. Ctrl rather than Shift because hjkl keeps all four of both rows:
+# $mod+hjkl focuses, $mod+Shift+hjkl moves.
+# Locking before suspend is wired to xss-lock further up.
+bindsym $mod+Ctrl+l exec --no-startup-id $HOME/.config/i3/script/i3lock-color.sh
 
 # i3-gaps
 gaps inner 1

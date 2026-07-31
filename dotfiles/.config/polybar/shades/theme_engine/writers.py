@@ -506,8 +506,8 @@ def dunst(p, path):
     return _write(path, content)
 
 
-def gtk(p, path):
-    """gtk.css for GTK3 and GTK4.
+def _gtk_css(p):
+    """The GTK stylesheet body, shared by the desktop and the login greeter.
 
     Adwaita-dark does the widget drawing; this repaints the parts of it that
     would otherwise stay stock blue, so Thunar and pavucontrol sit in the same
@@ -728,6 +728,93 @@ check:checked, radio:checked,
 switch:checked {{
     background-color: {p['accent']};
     color: {p['base']};
+}}
+"""
+    return content
+
+
+def gtk(p, path):
+    """~/.config/gtk-{3.0,4.0}/gtk.css - Thunar, pavucontrol, every GTK app."""
+    return _write(path, _gtk_css(p))
+
+
+def lightdm(p, path):
+    """The login greeter's stylesheet.
+
+    The greeter is a GTK app, so the block above already recolours most of it -
+    but its login panel and top bar are its own widgets, addressed by id, and
+    Adwaita has nothing to say about them. Without these rules the wallpaper
+    and the accent come through and the panel stays stock grey, which looks
+    like the theme half failed.
+
+    Written straight to /var/lib/lightdm-theme, not into $HOME: the greeter
+    runs as the lightdm user before anyone has logged in and can read nothing
+    of yours. postinstall.sh creates that directory owned by you, so this needs
+    no privileges - which is why the guard is "is it writable", not "does
+    lightdm exist".
+    """
+    content = _gtk_css(p) + f"""
+
+/* ---- login greeter ------------------------------------------------------
+ * lightdm-gtk-greeter's own widgets. These ids exist nowhere else, so the
+ * rules are inert in every other GTK app that reads this file.
+ */
+
+#panel_window {{
+    background-color: {p['crust']};
+    color: {p['subtext']};
+    font-weight: normal;
+}}
+
+#panel_window menubar > menuitem:hover {{
+    background-color: {p['surface1']};
+    color: {p['text']};
+}}
+
+#login_window, #shutdown_dialog, #restart_dialog {{
+    background-color: {p['mantle']};
+    color: {p['text']};
+    border: 1px solid {p['surface2']};
+    border-radius: 10px;
+}}
+
+#content_frame, #buttonbox_frame {{
+    background-color: transparent;
+    padding-bottom: 8px;
+}}
+
+#user_image {{
+    border: 2px solid {p['accent']};
+    border-radius: 8px;
+}}
+
+/* The password field is the one thing you actually aim at. */
+#login_window entry {{
+    background-color: {p['base']};
+    color: {p['text']};
+    border: 1px solid {p['surface2']};
+    border-radius: 6px;
+}}
+
+#login_window entry:focus {{
+    border-color: {p['accent']};
+}}
+
+#login_window button {{
+    background-image: none;
+    background-color: {p['surface1']};
+    color: {p['text']};
+    border: 1px solid {p['surface2']};
+    border-radius: 6px;
+}}
+
+#login_window button:hover {{
+    background-color: {p['surface2']};
+}}
+
+/* A wrong password should be obvious without reading anything. */
+#login_window #message_label {{
+    color: {p['urgent']};
 }}
 """
     return _write(path, content)

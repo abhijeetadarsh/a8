@@ -35,6 +35,10 @@ N_CLUSTERS = 8
 # seconds and produces the same centres as KMeans over 160k pixels.
 MAX_PIXELS = 400 * 400
 
+# Where the login greeter reads its theme from. Created by postinstall.sh,
+# owned by the logged-in user so nothing here ever needs root.
+LIGHTDM_THEME_DIR = "/var/lib/lightdm-theme"
+
 
 def extract_clusters(image_path, n_clusters=N_CLUSTERS, seed=0):
     """Return [(rgb_triple_0_to_1, weight), ...] sorted by weight descending."""
@@ -75,6 +79,64 @@ def extract_clusters(image_path, n_clusters=N_CLUSTERS, seed=0):
     ]
     clusters.sort(key=lambda c: c[1], reverse=True)
     return clusters
+
+
+def write_screen_image(image_path, spec, dim=1.0):
+    """Write the wallpaper cropped to fill WxH, as PNG. spec is "WxH:/path".
+
+    dim < 1 darkens it. The lock screen and the greeter draw light text and a
+    dark panel straight from the palette, and a bright wallpaper underneath
+    leaves the clock barely legible. i3lock-color has a --blur that would also
+    solve this, but on this build it is accepted, locks fine, and changes
+    nothing on screen - so the dimming happens here, where it is verifiable.
+
+    i3lock takes a PNG sized to the screen and nothing else: hand it the
+    wallpaper itself and you get a tiled or corner-anchored mess, and hand it a
+    JPEG and it refuses outright. The greeter wants the same picture, so this
+    produces it once and both read the result.
+
+    Done here rather than in a separate tool because the image is already
+    decoded a few lines up - a second program would mean a second decode of a
+    file that is routinely 4K.
+    """
+    size, _, out = spec.partition(":")
+    w, h = (int(v) for v in size.lower().split("x"))
+    if not out or w <= 0 or h <= 0:
+        raise ValueError(f"expected WxH:/path, got: {spec}")
+
+    image = cv2.imread(image_path)
+    if image is None:
+        raise ValueError(f"could not read image: {image_path}")
+
+    # Cover, not stretch: scale by whichever axis needs the most, then take the
+    # middle. This is what feh --bg-fill does, so the lock screen and the
+    # desktop behind it show the same framing.
+    ih, iw = image.shape[:2]
+    scale = max(w / iw, h / ih)
+    resized = cv2.resize(
+        image, (max(w, int(iw * scale + 0.5)), max(h, int(ih * scale + 0.5))),
+        interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC,
+    )
+    y = (resized.shape[0] - h) // 2
+    x = (resized.shape[1] - w) // 2
+    cropped = resized[y : y + h, x : x + w]
+
+    if dim != 1.0:
+        cropped = cv2.convertScaleAbs(cropped, alpha=dim, beta=0)
+
+    # Encoded explicitly rather than via imwrite: the format has to come from
+    # the ".png" here, not from the temp file's name, and writing bytes then
+    # renaming is what keeps a half-written background off the lock screen.
+    ok, buf = cv2.imencode(".png", cropped)
+    if not ok:
+        raise ValueError("could not encode the image as PNG")
+
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    tmp = out + ".part"
+    with open(tmp, "wb") as fh:
+        fh.write(buf.tobytes())
+    os.replace(tmp, out)
+    return out
 
 
 def _guard_ok(guard):
@@ -155,6 +217,13 @@ def build_targets(cache, cfg, home):
         ("gtk4",     writers.gtk,     f"{cfg}/gtk-4.0/gtk.css",                f"{cfg}/gtk-4.0"),
         # GTK2 has no config directory to guard on, and the file is tiny.
         ("gtk2",     writers.gtk2,    f"{home}/.gtkrc-2.0",                    None),
+        # The login greeter. Outside $HOME on purpose - it runs as the lightdm
+        # user before login and cannot read yours. postinstall.sh creates the
+        # directory owned by you, so the guard is whether it is there and
+        # writable: no directory means no display manager, and no write access
+        # means the install step has not run yet.
+        ("lightdm",  writers.lightdm, f"{LIGHTDM_THEME_DIR}/gtk.css",
+         lambda d=LIGHTDM_THEME_DIR: os.path.isdir(d) and os.access(d, os.W_OK)),
     ]
 
     # Qt. qt5ct/qt6ct create their own config directory on first run, so the
@@ -207,6 +276,16 @@ def main():
         "--print", dest="show", action="store_true",
         help="print the palette as swatches instead of writing anything",
     )
+    ap.add_argument(
+        "--screen-image", metavar="WxH:PATH",
+        help="also write the wallpaper cropped to fill WxH as a PNG, for the "
+             "lock screen and the login greeter",
+    )
+    ap.add_argument(
+        "--screen-image-dim", metavar="FACTOR", type=float, default=1.0,
+        help="darken that image by this factor, so the light text drawn over "
+             "it stays legible on a bright wallpaper (default: 1.0, unchanged)",
+    )
     args = ap.parse_args()
 
     if not os.path.exists(args.image_path):
@@ -239,6 +318,17 @@ def main():
             written.append(label)
         except OSError as exc:
             print(f"theme_engine: {label}: {exc}", file=sys.stderr)
+
+    if args.screen_image:
+        try:
+            written.append(os.path.basename(write_screen_image(
+                args.image_path, args.screen_image, args.screen_image_dim)))
+        except Exception as exc:
+            # Deliberately broad. The palette is already written and every
+            # program above has it; a missing lock background is worth saying
+            # out loud but is not a reason to fail the run that themed the
+            # whole desktop. cv2 also raises its own error type, not OSError.
+            print(f"theme_engine: screen image: {exc}", file=sys.stderr)
 
     msg = f"theme_engine: base {p['base']}, accent {p['accent']} -> {', '.join(written)}"
     if skipped:

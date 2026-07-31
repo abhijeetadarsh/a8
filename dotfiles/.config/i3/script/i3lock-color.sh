@@ -10,6 +10,23 @@ PALETTE="$HOME/.cache/theme/colors.sh"
 # shellcheck source=/dev/null
 [[ -f "$PALETTE" ]] && . "$PALETTE"
 
+# The wallpaper, already cropped to one monitor's size and darkened by
+# theme_init.sh. i3lock wants a PNG and refuses a JPEG outright, so pointing it
+# at the wallpaper directly is not an option; without this the lock screen is a
+# flat colour, which is what it always was.
+#
+# No --blur here on purpose. i3lock-color takes the flag, locks normally and
+# changes nothing on screen, so the dimming is baked into the image instead -
+# where it can be checked by looking at the file.
+LOCK_IMAGE="$HOME/.cache/theme/lock.png"
+
+BG_ARGS=()
+[[ -f "$LOCK_IMAGE" ]] && BG_ARGS+=( --image "$LOCK_IMAGE" --fill )
+
+# xss-lock needs the locker to stay in the foreground, so it passes --nofork.
+# Anything given on the command line goes straight through to i3lock.
+PASSTHROUGH=( "$@" )
+
 # i3lock wants #rrggbbaa; the palette stores #rrggbb.
 a() { printf '%sff' "${1:-$2}"; }
 
@@ -24,6 +41,8 @@ VERIF_COLOR=$(a "${THEME_TEXT:-}"     "#cdd6f4")
 WRONG_COLOR=$(a "${THEME_RED:-}"      "#f38ba8")
 
 i3lock \
+"${BG_ARGS[@]}" \
+"${PASSTHROUGH[@]}" \
 --color="$BACKGROUND" \
 --bar-indicator \
 --bar-pos y+h \
@@ -39,6 +58,7 @@ i3lock \
 --clock \
 --force-clock \
 --time-str="%I:%M %p" \
+--date-str="%A, %d %B" \
 --time-pos x+5:y+h-110 \
 --time-color "$TIME_COLOR" \
 --date-pos tx+5:ty+45 \

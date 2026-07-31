@@ -59,6 +59,8 @@ other mode there would mean a reboot silently threw away your wallpaper.
        ├── ~/.config/gtk-{3.0,4.0}/gtk.css   Thunar, pavucontrol, GTK apps
        ├── ~/.gtkrc-2.0                      the GTK2 holdouts
        ├── ~/.config/qt{5,6}ct/...           Qt apps, if qt5ct/qt6ct is installed
+       ├── ~/.cache/theme/lock.png           lock screen + login background
+       ├── /var/lib/lightdm-theme/gtk.css    the login greeter
        └── ~/.mozilla/firefox/<profile>/     Firefox, one set per profile
              ├── chrome/userChrome.css       the browser UI
              ├── chrome/userContent.css      the about: pages
@@ -128,6 +130,53 @@ restyling individual widgets, which is what keeps it working across releases.
 Websites are deliberately left alone; only `ui.systemUsesDarkTheme` is set, so
 sites that have a dark mode use it.
 
+## The lock screen and the login screen
+
+Both show the current wallpaper, darkened, with the palette on top.
+
+`theme_engine` writes one image, `~/.cache/theme/lock.png`, and both read it.
+It is cropped to **one monitor's** size rather than the whole X screen: i3lock
+and the greeter each scale it onto every output separately, so an image as wide
+as both screens gets fill-cropped twice and you see the middle of the picture,
+zoomed, repeated. One monitor's worth gets the same framing `feh` gives the
+desktop behind it.
+
+The darkening (`LOCK_DIM`, 0.55 by default) is baked into that file. i3lock-color
+has a `--blur` that would do the same job, and on this build it is accepted,
+locks normally, and changes nothing on screen - so it is not used. A bright
+wallpaper under the palette's light clock is unreadable otherwise.
+
+| | |
+| --- | --- |
+| `$mod+Ctrl+l` | lock now |
+| before suspend | `xss-lock` runs the same script, with `--nofork` |
+
+Ctrl rather than Shift so hjkl keeps both full rows: `$mod+hjkl` focuses,
+`$mod+Shift+hjkl` moves.
+
+`--nofork` is not optional there: `xss-lock` tracks the locker as a child, and
+one that forks away looks like it exited, so the machine would suspend with the
+screen unlocked.
+
+### Why the greeter's theme lives outside $HOME
+
+The login greeter runs as the `lightdm` user, before anyone has logged in. It
+cannot read your palette, your wallpaper, or anything else under `/home`.
+
+`postinstall.sh` creates `/var/lib/lightdm-theme/` **owned by you**, once, as
+root. After that the theme engine writes the greeter's stylesheet straight into
+it and `theme_init.sh` copies the background alongside - both with ordinary
+user permissions. There is no `sudo` anywhere in the theming path, and no
+NOPASSWD rule firing on every wallpaper change.
+
+GTK looks for a user stylesheet in the greeter's own home, so
+`/var/lib/lightdm/.config/gtk-3.0/gtk.css` is a symlink into that directory.
+
+The greeter's stylesheet is the desktop one plus rules for `#login_window`,
+`#panel_window` and friends - ids that exist in no other GTK app. Without them
+the wallpaper and the accent come through but the login panel stays stock
+Adwaita grey, which reads as the theme half-failing.
+
 ## What repaints immediately, and what does not
 
 `theme_init.sh` reloads what can be reloaded. The rest is a matter of how the
@@ -138,6 +187,8 @@ program reads its config, not something the script can work around:
 | i3, polybar, rofi, dunst, kitty, xrdb | immediately |
 | GTK apps | immediately - the `gtk-theme` toggle in `theme_init.sh` forces a re-read of `gtk.css` |
 | Qt apps | next launch |
+| lock screen | next lock - the image is regenerated with the palette |
+| login greeter | next logout - the greeter reads its theme when it starts |
 | Firefox | next launch - `userChrome.css` is parsed during startup |
 | neovim | `:ThemeReload`, or next launch |
 

@@ -31,15 +31,40 @@ Re-running it is the supported way to fix a half-finished install.
 5. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
-6. **`~/.xinitrc`** - written so `startx` merges the X resources, points Qt at
-   a platform theme so Qt apps follow the generated palette, and execs i3. An
-   `.xinitrc` this script wrote is rewritten on a re-run; one you wrote
-   yourself is left alone.
-7. **Palette** - generates the desktop colour scheme from a wallpaper, so the
-   first `startx` lands on a themed desktop rather than an i3 config error.
+6. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
+   ways into it. See below; a file either of them wrote is rewritten on a
+   re-run, one you wrote yourself is left alone.
+7. **Login screen** - LightDM plus the GTK greeter, configured and enabled, and
+   the directory the greeter reads its theme from.
+8. **Palette** - generates the desktop colour scheme from a wallpaper, so the
+   first login lands on a themed desktop rather than an i3 config error.
    i3's other generated include, `monitors.conf`, gets an empty placeholder for
    the same reason: the script cannot work out the real monitor layout without
    a running X server, and `monitors.sh` rewrites it at every i3 start anyway.
+
+## Two ways in, one environment
+
+`startx` runs `~/.xinitrc`. LightDM does not read that file at all - it runs
+`/etc/lightdm/Xsession`, which sources `~/.xprofile`, merges `~/.Xresources`
+itself, and then execs whatever `/usr/share/xsessions/i3.desktop` says, which
+is a bare `Exec=i3`.
+
+So the session environment lives in **`~/.xprofile`**, and `.xinitrc` sources
+it. Anything exported only from `.xinitrc` is silently missing under the
+display manager: Qt apps come up unthemed, Java apps draw blank windows, and
+`$mod+Shift+w` loses `WALLPAPER_SOURCE`.
+
+`WALLPAPER_SOURCE` is the one line in the generated `.xprofile` you are meant
+to edit, so a re-run reads the current value and keeps it rather than resetting
+it to the default.
+
+To go back to booting at a TTY:
+
+```sh
+sudo systemctl disable lightdm.service
+```
+
+`startx` keeps working either way.
 
 ## Re-running: the package picker
 

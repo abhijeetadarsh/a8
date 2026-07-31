@@ -105,8 +105,45 @@ esac
 
 mkdir -p "$CACHE"
 
+# The size to render the lock and login background at: the largest single
+# monitor, NOT the whole X screen.
+#
+# i3lock --fill and the greeter both scale the image onto each output
+# separately. Hand them one image the width of every screen combined and each
+# monitor fill-crops that, so you get the middle of the picture zoomed in and
+# repeated. One monitor's worth of pixels gets the same framing feh gives the
+# desktop behind it.
+screen_size() {
+    xrandr --query 2>/dev/null | awk '
+        / connected/ {
+            for (i = 3; i <= NF; i++)
+                if ($i ~ /^[0-9]+x[0-9]+\+-?[0-9]+\+-?[0-9]+$/) {
+                    split($i, g, "+"); split(g[1], r, "x")
+                    if (r[1] * r[2] > best) { best = r[1] * r[2]; w = r[1]; h = r[2] }
+                    break
+                }
+        }
+        END { if (w) print w "x" h }'
+}
+
+# How far to darken that image. The lock screen draws the clock in the
+# palette's text colour, which is picked to read against the palette's dark
+# background - not against a bright photo. LOCK_DIM=1 leaves the wallpaper as
+# it is.
+ENGINE_ARGS=()
+if command -v xrandr >/dev/null; then
+    SIZE="$(screen_size)"
+    [[ "$SIZE" =~ ^[0-9]+x[0-9]+$ ]] && ENGINE_ARGS+=(
+        --screen-image "$SIZE:$CACHE/lock.png"
+        --screen-image-dim "${LOCK_DIM:-0.55}"
+    )
+fi
+
 if [[ -n "${WALLPAPER:-}" && -f "$WALLPAPER" ]]; then
-    python "$ENGINE" "$WALLPAPER" -o "$CACHE" || die "palette generation failed"
+    # Plain "${a[@]}", not "${a[@]:-}": the :- form passes one empty argument
+    # when the array is empty, which argparse reads as a second wallpaper path.
+    python "$ENGINE" "$WALLPAPER" -o "$CACHE" "${ENGINE_ARGS[@]}" ||
+        die "palette generation failed"
     printf '%s\n' "$WALLPAPER" > "$STATE"
     if (( SET_WALLPAPER )) && command -v feh >/dev/null; then
         feh --bg-fill "$WALLPAPER"
@@ -165,6 +202,19 @@ fi
 # Firefox and Qt apps have no reload path at all - Firefox parses userChrome.css
 # during startup and qt5ct's palette is read when the app builds its QPalette.
 # Both pick the new colours up the next time they are launched.
+
+# The login greeter's background. Its stylesheet is written by theme_engine
+# like every other program's; this is just the image, which the engine already
+# produced for the lock screen. Both show the same picture on purpose - the
+# screen you unlock and the screen you log in at should not disagree.
+#
+# postinstall.sh creates this directory owned by you, so copying into it needs
+# no privileges: there is no sudo anywhere in the theming path.
+GREETER_DIR="/var/lib/lightdm-theme"
+if [[ -w "$GREETER_DIR" && -f "$CACHE/lock.png" ]]; then
+    cp -f "$CACHE/lock.png" "$GREETER_DIR/background.png.part" 2>/dev/null &&
+        mv -f "$GREETER_DIR/background.png.part" "$GREETER_DIR/background.png"
+fi
 
 # polybar cannot reload, only restart - launch.sh already kills the old one and
 # starts one bar per connected monitor.
