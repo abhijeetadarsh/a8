@@ -31,7 +31,10 @@ Re-running it is the supported way to fix a half-finished install.
 5. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
-6. **`~/.xinitrc`** - written so `startx` merges the X resources and execs i3.
+6. **`~/.xinitrc`** - written so `startx` merges the X resources, points Qt at
+   a platform theme so Qt apps follow the generated palette, and execs i3. An
+   `.xinitrc` this script wrote is rewritten on a re-run; one you wrote
+   yourself is left alone.
 7. **Palette** - generates the desktop colour scheme from a wallpaper, so the
    first `startx` lands on a themed desktop rather than an i3 config error.
 

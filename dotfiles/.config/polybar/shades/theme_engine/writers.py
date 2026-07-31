@@ -1,7 +1,7 @@
 """
 Writers - one function per program that needs to be told about the palette.
 
-Two output roots, and the split is not arbitrary:
+Output roots, and the split is not arbitrary:
 
   ~/.cache/theme/          for programs that can be pointed at an absolute
                            path (nvim via dofile, starship via STARSHIP_CONFIG,
@@ -10,6 +10,12 @@ Two output roots, and the split is not arbitrary:
   ~/.config/<program>/     for programs whose include mechanism only reliably
                            resolves a file sitting next to their main config
                            (polybar, rofi, i3, kitty, dunst, gtk).
+
+  ~/                       for programs that predate ~/.config and still only
+                           look in $HOME (GTK2's ~/.gtkrc-2.0).
+
+  ~/.mozilla/firefox/<p>/   Firefox, which keeps its whole configuration inside
+                           each profile directory.
 
 The second group is why postinstall stows with --no-folding: it makes
 ~/.config/kitty a real directory holding a symlinked kitty.conf, so a
@@ -506,8 +512,19 @@ def gtk(p, path):
     Adwaita-dark does the widget drawing; this repaints the parts of it that
     would otherwise stay stock blue, so Thunar and pavucontrol sit in the same
     scheme as everything else.
+
+    Two halves. The @define-color block is the important one: Adwaita's own
+    stylesheet is written in terms of these names, so redefining them recolours
+    every widget it draws. The rules after it are for the places where Adwaita
+    hardcodes a colour instead of naming one - Thunar's sidebar and location
+    bar are the ones that show up immediately.
     """
     content = f"""/* {HEADER} */
+
+/* ---- named colours ------------------------------------------------------
+ * Adwaita (GTK3) and libadwaita (GTK4) both look these up by name, so
+ * redefining them here repaints the stock theme rather than replacing it.
+ */
 
 @define-color accent_color {p['accent']};
 @define-color accent_bg_color {p['accent']};
@@ -521,8 +538,24 @@ def gtk(p, path):
 @define-color theme_selected_bg_color {p['accent']};
 @define-color theme_selected_fg_color {p['base']};
 
+/* GTK2-era aliases. Plenty of GTK3 themes and apps still reference these. */
+@define-color selected_bg_color {p['accent']};
+@define-color selected_fg_color {p['base']};
+@define-color bg_color {p['base']};
+@define-color fg_color {p['text']};
+@define-color base_color {p['mantle']};
+@define-color text_color {p['text']};
+
 @define-color insensitive_fg_color {p['muted']};
 @define-color insensitive_bg_color {p['surface0']};
+@define-color insensitive_base_color {p['mantle']};
+
+@define-color theme_unfocused_bg_color {p['base']};
+@define-color theme_unfocused_base_color {p['mantle']};
+@define-color theme_unfocused_fg_color {p['subtext']};
+@define-color theme_unfocused_text_color {p['subtext']};
+@define-color theme_unfocused_selected_bg_color {p['surface2']};
+@define-color theme_unfocused_selected_fg_color {p['text']};
 
 @define-color borders {p['surface2']};
 @define-color unfocused_borders {p['surface1']};
@@ -530,6 +563,8 @@ def gtk(p, path):
 @define-color headerbar_bg_color {p['mantle']};
 @define-color headerbar_fg_color {p['text']};
 @define-color headerbar_border_color {p['surface1']};
+@define-color headerbar_backdrop_color {p['crust']};
+@define-color headerbar_shade_color {p['crust']};
 
 @define-color popover_bg_color {p['mantle']};
 @define-color popover_fg_color {p['text']};
@@ -543,14 +578,502 @@ def gtk(p, path):
 @define-color card_bg_color {p['surface0']};
 @define-color card_fg_color {p['text']};
 
+@define-color dialog_bg_color {p['mantle']};
+@define-color dialog_fg_color {p['text']};
+
 @define-color sidebar_bg_color {p['mantle']};
 @define-color sidebar_fg_color {p['subtext']};
+@define-color sidebar_backdrop_color {p['crust']};
+@define-color sidebar_border_color {p['surface1']};
+@define-color sidebar_shade_color {p['crust']};
 
 @define-color error_color {p['red']};
+@define-color error_bg_color {p['red']};
+@define-color error_fg_color {p['base']};
 @define-color warning_color {p['yellow']};
+@define-color warning_bg_color {p['yellow']};
+@define-color warning_fg_color {p['base']};
 @define-color success_color {p['green']};
+@define-color success_bg_color {p['green']};
+@define-color success_fg_color {p['base']};
+@define-color destructive_color {p['red']};
+@define-color destructive_bg_color {p['red']};
+@define-color destructive_fg_color {p['base']};
+
+@define-color link_color {p['blue']};
+@define-color visited_link_color {p['magenta']};
+
+@define-color tooltip_bg_color {p['surface0']};
+@define-color tooltip_fg_color {p['text']};
+
+@define-color scrollbar_bg_color {p['mantle']};
+@define-color scrollbar_slider_color {p['overlay0']};
+
+/* ---- the places a named colour does not reach --------------------------- */
+
+*:selected,
+*:selected:focus {{
+    background-color: {p['accent']};
+    color: {p['base']};
+}}
+
+/* Thunar: the shortcuts sidebar, the path bar and the file list. Adwaita
+ * paints these from its own greys, so they are the parts that stay stock
+ * without this. */
+.sidebar,
+.sidebar list,
+placessidebar,
+placessidebar list {{
+    background-color: {p['mantle']};
+    color: {p['subtext']};
+}}
+
+placessidebar row:selected,
+.sidebar row:selected {{
+    background-color: {p['surface1']};
+    color: {p['text']};
+}}
+
+.path-bar button,
+.linked > button {{
+    background-image: none;
+    background-color: {p['surface0']};
+    color: {p['text']};
+    border-color: {p['surface1']};
+}}
+
+.path-bar button:checked,
+.path-bar button:active {{
+    background-color: {p['accent']};
+    color: {p['base']};
+}}
+
+treeview.view {{
+    background-color: {p['base']};
+    color: {p['text']};
+}}
+
+treeview.view:selected {{
+    background-color: {p['accent']};
+    color: {p['base']};
+}}
+
+treeview.view header button {{
+    background-image: none;
+    background-color: {p['mantle']};
+    color: {p['subtext']};
+    border-color: {p['surface1']};
+}}
+
+entry, spinbutton {{
+    background-color: {p['surface0']};
+    color: {p['text']};
+    border-color: {p['surface1']};
+}}
+
+entry:focus {{
+    border-color: {p['accent']};
+}}
+
+entry selection {{
+    background-color: {p['accent']};
+    color: {p['base']};
+}}
+
+notebook > header {{
+    background-color: {p['mantle']};
+}}
+
+notebook > header tab:checked {{
+    box-shadow: inset 0 -3px {p['accent']};
+    color: {p['text']};
+}}
+
+progressbar progress,
+levelbar block.filled,
+scale highlight {{
+    background-color: {p['accent']};
+}}
+
+scrollbar {{
+    background-color: {p['mantle']};
+    border-color: {p['surface1']};
+}}
+
+scrollbar slider {{
+    background-color: {p['overlay0']};
+}}
+
+scrollbar slider:hover {{
+    background-color: {p['overlay1']};
+}}
+
+tooltip, tooltip.background {{
+    background-color: {p['surface0']};
+    color: {p['text']};
+}}
+
+menu, .menu, popover, popover contents {{
+    background-color: {p['mantle']};
+    color: {p['text']};
+}}
+
+menu menuitem:hover,
+popover listview row:hover {{
+    background-color: {p['surface1']};
+    color: {p['text']};
+}}
+
+check:checked, radio:checked,
+switch:checked {{
+    background-color: {p['accent']};
+    color: {p['base']};
+}}
 """
     return _write(path, content)
+
+
+def gtk2(p, path):
+    """~/.gtkrc-2.0 - GTK2 is dead upstream and alive on any Arch desktop.
+
+    Written unconditionally because it is one small file and the apps that
+    need it (older GIMP, wicd-style tools, a few Wine dialogs) do not
+    advertise themselves with a directory under ~/.config the way GTK3 does.
+    GTK2 has no cascade: one style, applied to GtkWidget, is the whole theme.
+    """
+    content = f"""# {HEADER}
+
+gtk-theme-name="Adwaita-dark"
+gtk-icon-theme-name="Papirus-Dark"
+gtk-cursor-theme-name="Adwaita"
+gtk-cursor-theme-size=24
+gtk-font-name="Fantasque Sans Mono 11"
+gtk-enable-animations=1
+gtk-xft-antialias=1
+gtk-xft-hinting=1
+gtk-xft-hintstyle="hintfull"
+gtk-xft-rgba="rgb"
+
+style "wallpaper" {{
+    fg[NORMAL]        = "{p['text']}"
+    fg[PRELIGHT]      = "{p['text']}"
+    fg[ACTIVE]        = "{p['text']}"
+    fg[SELECTED]      = "{p['base']}"
+    fg[INSENSITIVE]   = "{p['muted']}"
+
+    bg[NORMAL]        = "{p['base']}"
+    bg[PRELIGHT]      = "{p['surface1']}"
+    bg[ACTIVE]        = "{p['surface0']}"
+    bg[SELECTED]      = "{p['accent']}"
+    bg[INSENSITIVE]   = "{p['mantle']}"
+
+    base[NORMAL]      = "{p['mantle']}"
+    base[PRELIGHT]    = "{p['surface0']}"
+    base[ACTIVE]      = "{p['surface1']}"
+    base[SELECTED]    = "{p['accent']}"
+    base[INSENSITIVE] = "{p['mantle']}"
+
+    text[NORMAL]      = "{p['text']}"
+    text[PRELIGHT]    = "{p['text']}"
+    text[ACTIVE]      = "{p['text']}"
+    text[SELECTED]    = "{p['base']}"
+    text[INSENSITIVE] = "{p['muted']}"
+}}
+
+class "GtkWidget" style "wallpaper"
+"""
+    return _write(path, content)
+
+
+# qt5ct/qt6ct store a QPalette as one comma-separated line per colour group,
+# in QPalette::ColorRole enum order. The order is not documented anywhere in
+# qt5ct - it is the enum - so it is spelled out here.
+_QT_ROLES = (
+    "WindowText", "Button", "Light", "Midlight", "Dark", "Mid", "Text",
+    "BrightText", "ButtonText", "Base", "Window", "Shadow", "Highlight",
+    "HighlightedText", "Link", "LinkVisited", "AlternateBase", "NoRole",
+    "ToolTipBase", "ToolTipText", "PlaceholderText",
+)
+
+
+def _qt_group(p, disabled=False):
+    """One qt5ct colour line: the 21 QPalette roles, in enum order."""
+    fg = p["muted"] if disabled else p["text"]
+    roles = {
+        "WindowText": fg,
+        "Button": p["surface0"],
+        "Light": p["surface2"],
+        "Midlight": p["surface1"],
+        "Dark": p["crust"],
+        "Mid": p["overlay0"],
+        "Text": fg,
+        "BrightText": p["accent"],
+        "ButtonText": fg,
+        "Base": p["mantle"],
+        "Window": p["base"],
+        "Shadow": p["crust"],
+        "Highlight": p["surface1"] if disabled else p["accent"],
+        "HighlightedText": p["muted"] if disabled else p["base"],
+        "Link": p["blue"],
+        "LinkVisited": p["magenta"],
+        "AlternateBase": p["surface0"],
+        "NoRole": p["base"],
+        "ToolTipBase": p["surface0"],
+        "ToolTipText": p["text"],
+        "PlaceholderText": p["muted"],
+    }
+    return ", ".join(roles[r] for r in _QT_ROLES)
+
+
+def qt_colors(p, path):
+    """A qt5ct/qt6ct colour scheme - the palette Qt apps actually draw with."""
+    active = _qt_group(p)
+    content = f"""# {HEADER}
+
+[ColorScheme]
+active_colors={active}
+inactive_colors={active}
+disabled_colors={_qt_group(p, disabled=True)}
+"""
+    return _write(path, content)
+
+
+def qtct(p, path):
+    """qt5ct.conf / qt6ct.conf, generated whole.
+
+    qt5ct only applies a custom palette when it is pointed at a scheme file by
+    absolute path, so the conf has to be generated alongside the scheme rather
+    than shipped as a static dotfile. Fusion is the style because it is the one
+    Qt style that honours the palette for every widget; Breeze and the platform
+    styles paint parts of themselves regardless.
+
+    The [Fonts] section is deliberately absent - qt5ct stores fonts as
+    QVariant-encoded binary, which is not something to hand-write, and leaving
+    it out just means Qt keeps its own font settings.
+    """
+    # abspath, not just join: qt5ct resolves color_scheme_path relative to its
+    # own working directory, which is whatever launched the app.
+    scheme = os.path.abspath(
+        os.path.join(os.path.dirname(path), "colors", "wallpaper.conf")
+    )
+    content = f"""# {HEADER}
+
+[Appearance]
+custom_palette=true
+color_scheme_path={scheme}
+style=Fusion
+icon_theme=Papirus-Dark
+standard_dialogs=default
+
+[Interface]
+activate_item_on_single_click=1
+buttonbox_layout=0
+cursor_flash_time=1000
+dialog_buttons_have_icons=1
+gui_effects=@Invalid()
+menus_have_icons=true
+show_shortcuts_in_context_menus=true
+toolbutton_style=4
+underline_shortcut=1
+wheel_scroll_lines=3
+"""
+    return _write(path, content)
+
+
+# Markers so the Firefox user.js block can be rewritten in place without
+# touching prefs the user set themselves.
+FF_BEGIN = "// >>> theme_engine >>>"
+FF_END = "// <<< theme_engine <<<"
+
+
+def firefox(p, path):
+    """Theme one Firefox profile. `path` is the profile directory.
+
+    Unlike every other writer this one produces three files, because Firefox
+    needs all three to be themed at all:
+
+      chrome/userChrome.css   the browser UI - tabs, toolbar, menus
+      chrome/userContent.css  the about: pages
+      user.js                 the pref that makes Firefox read the other two
+
+    Firefox reads all of these once, at startup. A wallpaper change repaints
+    everything else live; the browser catches up the next time it is launched.
+    """
+    chrome = os.path.join(path, "chrome")
+
+    # Firefox's own theming is driven by --lwt-* and a set of toolbar
+    # variables. Overriding them at :root recolours the stock UI, which is far
+    # less brittle than restyling individual widgets whose IDs move between
+    # releases. !important because the built-in theme sets them inline.
+    user_chrome = f"""/* {HEADER} */
+
+:root {{
+    --lwt-accent-color: {p['base']} !important;
+    --lwt-accent-color-inactive: {p['crust']} !important;
+    --lwt-text-color: {p['text']} !important;
+    --lwt-selected-tab-background-color: {p['surface1']} !important;
+    --lwt-tab-line-color: {p['accent']} !important;
+    --lwt-toolbarbutton-icon-fill: {p['text']} !important;
+    --lwt-toolbarbutton-hover-background: {p['surface1']} !important;
+    --lwt-toolbarbutton-active-background: {p['surface2']} !important;
+    --lwt-sidebar-background-color: {p['mantle']} !important;
+    --lwt-sidebar-text-color: {p['text']} !important;
+
+    --toolbar-bgcolor: {p['mantle']} !important;
+    --toolbar-color: {p['text']} !important;
+    --toolbar-field-background-color: {p['surface0']} !important;
+    --toolbar-field-color: {p['text']} !important;
+    --toolbar-field-focus-background-color: {p['surface1']} !important;
+    --toolbar-field-focus-color: {p['text']} !important;
+    --toolbar-field-border-color: {p['surface1']} !important;
+    --toolbar-field-focus-border-color: {p['accent']} !important;
+    --toolbarbutton-icon-fill: {p['text']} !important;
+    --toolbarbutton-icon-fill-attention: {p['accent']} !important;
+    --toolbarbutton-hover-background: {p['surface1']} !important;
+    --toolbarbutton-active-background: {p['surface2']} !important;
+
+    --tab-selected-bgcolor: {p['surface1']} !important;
+    --tab-selected-textcolor: {p['text']} !important;
+    --tab-selected-outline-color: {p['accent']} !important;
+    --tabpanel-background-color: {p['base']} !important;
+
+    --urlbar-box-bgcolor: {p['surface0']} !important;
+    --urlbar-box-focus-bgcolor: {p['surface1']} !important;
+    --urlbar-box-text-color: {p['text']} !important;
+    --urlbar-box-hover-bgcolor: {p['surface1']} !important;
+
+    --arrowpanel-background: {p['mantle']} !important;
+    --arrowpanel-color: {p['text']} !important;
+    --arrowpanel-border-color: {p['surface2']} !important;
+    --panel-background: {p['mantle']} !important;
+    --panel-color: {p['text']} !important;
+    --panel-border-color: {p['surface2']} !important;
+    --panel-item-hover-bgcolor: {p['surface1']} !important;
+    --panel-item-active-bgcolor: {p['surface2']} !important;
+    --panel-separator-color: {p['surface1']} !important;
+
+    --button-bgcolor: {p['surface0']} !important;
+    --button-color: {p['text']} !important;
+    --button-hover-bgcolor: {p['surface1']} !important;
+    --button-active-bgcolor: {p['surface2']} !important;
+    --button-primary-bgcolor: {p['accent']} !important;
+    --button-primary-color: {p['base']} !important;
+
+    --focus-outline-color: {p['accent']} !important;
+    --link-color: {p['blue']} !important;
+    --link-color-visited: {p['magenta']} !important;
+    --sidebar-background-color: {p['mantle']} !important;
+    --sidebar-text-color: {p['text']} !important;
+    --newtab-background-color: {p['base']} !important;
+    --newtab-text-primary-color: {p['text']} !important;
+    --error-text-color: {p['red']} !important;
+    --warning-text-color: {p['yellow']} !important;
+
+    scrollbar-color: {p['overlay0']} {p['mantle']} !important;
+}}
+
+#navigator-toolbox {{
+    background-color: {p['base']} !important;
+    border-bottom: 1px solid {p['surface1']} !important;
+}}
+
+#urlbar[focused="true"] > #urlbar-background {{
+    outline-color: {p['accent']} !important;
+}}
+
+.tabbrowser-tab[selected] .tab-content {{
+    border-top: 2px solid {p['accent']} !important;
+}}
+
+findbar {{
+    background-color: {p['mantle']} !important;
+    color: {p['text']} !important;
+    border-top-color: {p['surface1']} !important;
+}}
+
+#sidebar-box, #sidebar-header {{
+    background-color: {p['mantle']} !important;
+    color: {p['text']} !important;
+}}
+
+menupopup, panel {{
+    --panel-background: {p['mantle']} !important;
+    --panel-color: {p['text']} !important;
+}}
+
+menupopup > menuitem[_moz-menuactive="true"] {{
+    background-color: {p['surface1']} !important;
+    color: {p['text']} !important;
+}}
+"""
+
+    # about: pages only. Restyling arbitrary websites from here breaks them -
+    # the sites' own dark themes are already better than anything derived from
+    # a wallpaper - so this stops at Firefox's own chrome-adjacent pages.
+    user_content = f"""/* {HEADER} */
+
+@-moz-document url("about:blank"),
+               url("about:newtab"),
+               url("about:home"),
+               url("about:privatebrowsing") {{
+    :root, body {{
+        background-color: {p['base']} !important;
+        color: {p['text']} !important;
+    }}
+}}
+
+@-moz-document url-prefix("about:") {{
+    :root {{
+        --in-content-page-background: {p['base']} !important;
+        --in-content-page-color: {p['text']} !important;
+        --in-content-box-background: {p['mantle']} !important;
+        --in-content-box-background-odd: {p['surface0']} !important;
+        --in-content-text-color: {p['text']} !important;
+        --in-content-deemphasized-text: {p['muted']} !important;
+        --in-content-border-color: {p['surface1']} !important;
+        --in-content-accent-color: {p['accent']} !important;
+        --in-content-primary-button-background: {p['accent']} !important;
+        --in-content-primary-button-text-color: {p['base']} !important;
+        --in-content-link-color: {p['blue']} !important;
+        --in-content-link-color-visited: {p['magenta']} !important;
+        scrollbar-color: {p['overlay0']} {p['mantle']} !important;
+    }}
+}}
+"""
+
+    _write(os.path.join(chrome, "userChrome.css"), user_chrome)
+    _write(os.path.join(chrome, "userContent.css"), user_content)
+
+    # user.js is Firefox's only pref-file hook and there is no drop-in
+    # directory, so the block is delimited and merged rather than written
+    # over the top of whatever else is in there.
+    block = "\n".join([
+        FF_BEGIN,
+        f"// {HEADER}",
+        '// userChrome.css / userContent.css are ignored without this.',
+        'user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);',
+        'user_pref("browser.theme.dark-private-windows", true);',
+        '// Tell pages the system is dark, so sites with a dark mode use it.',
+        'user_pref("ui.systemUsesDarkTheme", 1);',
+        FF_END,
+        "",
+    ])
+
+    user_js = os.path.join(path, "user.js")
+    existing = ""
+    if os.path.exists(user_js):
+        with open(user_js) as f:
+            existing = f.read()
+        if FF_BEGIN in existing and FF_END in existing:
+            head, _, rest = existing.partition(FF_BEGIN)
+            _, _, tail = rest.partition(FF_END)
+            existing = head + tail.lstrip("\n")
+
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    _write(user_js, existing + block)
+
+    return path
 
 
 def xresources(p, path):

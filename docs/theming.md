@@ -1,8 +1,8 @@
 # Theming
 
 One wallpaper decides the colour of the entire desktop. Change the wallpaper
-and i3, polybar, rofi, kitty, dunst, GTK, neovim, ranger, the shell prompt and
-the lock screen all change with it.
+and i3, polybar, rofi, kitty, dunst, GTK, Qt, Firefox, Thunar, neovim, ranger,
+the shell prompt and the lock screen all change with it.
 
 ```
 $mod+Shift+w        new random wallpaper, re-theme everything
@@ -34,12 +34,18 @@ $mod+Ctrl+Shift+w   fetch today's Bing image and theme from that
        ├── ~/.config/rofi/colors.rasi        launcher
        ├── ~/.config/kitty/current-theme.conf     16 ANSI colours
        ├── ~/.config/dunst/dunstrc.d/99-theme.conf  notifications
-       └── ~/.config/gtk-{3.0,4.0}/gtk.css   Thunar, pavucontrol
+       ├── ~/.config/gtk-{3.0,4.0}/gtk.css   Thunar, pavucontrol, GTK apps
+       ├── ~/.gtkrc-2.0                      the GTK2 holdouts
+       ├── ~/.config/qt{5,6}ct/...           Qt apps, if qt5ct/qt6ct is installed
+       └── ~/.mozilla/firefox/<profile>/     Firefox, one set per profile
+             ├── chrome/userChrome.css       the browser UI
+             ├── chrome/userContent.css      the about: pages
+             └── user.js                     the pref that enables the two above
 ```
 
 `theme_init.sh` runs the generator and then reloads everything that can be
-reloaded without a logout: `xrdb`, `SIGUSR1` to kitty, a dunst restart, a
-polybar relaunch and `i3-msg reload`.
+reloaded without a logout: `xrdb`, `SIGUSR1` to kitty, a dunst restart, a GTK
+theme-name toggle, a polybar relaunch and `i3-msg reload`.
 
 **All of these outputs are generated.** None of them is in git, and editing one
 by hand lasts until the next wallpaper change.
@@ -65,11 +71,65 @@ The 16 ANSI slots are anchored to canonical hues and may only be pulled 12°
 toward the wallpaper's dominant hue. A terminal red has to look like a red -
 `git diff` and every TUI on the system depend on it.
 
+## Toolkits, not just programs
+
+Most of the desktop is one program per config file. The application toolkits
+are not, and they are what makes the theme reach programs this repo has never
+heard of.
+
+**GTK3 / GTK4.** Adwaita-dark does the widget drawing and the generated
+`gtk.css` redefines the colours it draws with, so Thunar, pavucontrol, the file
+chooser and every other GTK app follow along. Adwaita hardcodes a few things
+instead of naming them - Thunar's sidebar and path bar, tree view headers,
+scrollbars - so `gtk.css` also carries explicit rules for those.
+
+**GTK2.** `~/.gtkrc-2.0`. GTK2 has no cascade: one style block applied to
+`GtkWidget` is the entire theme. Written unconditionally, because GTK2 apps
+have no config directory to detect them by and the file is small.
+
+**Qt.** Qt does not read GTK's colours on its own; a platform theme plugin
+bridges the two, selected by `QT_QPA_PLATFORMTHEME` in `~/.xinitrc`:
+
+| plugin | when | how it gets the colours |
+| --- | --- | --- |
+| `qt6ct` / `qt5ct` | installed | the engine writes them an exact palette |
+| `gtk3` | otherwise | Qt reads the generated GTK theme |
+
+The fallback is the default, and it is why neither qt5ct nor qt6ct is in the
+package list: the colours are already there in `gtk.css`.
+
+**Firefox** gets `userChrome.css` (tabs, toolbar, menus, sidebar, find bar),
+`userContent.css` (the `about:` pages) and the `user.js` pref that makes
+Firefox read either of them - written into every profile in `profiles.ini`.
+The CSS drives Firefox's own `--lwt-*` and toolbar variables rather than
+restyling individual widgets, which is what keeps it working across releases.
+Websites are deliberately left alone; only `ui.systemUsesDarkTheme` is set, so
+sites that have a dark mode use it.
+
+## What repaints immediately, and what does not
+
+`theme_init.sh` reloads what can be reloaded. The rest is a matter of how the
+program reads its config, not something the script can work around:
+
+| | when the new palette lands |
+| --- | --- |
+| i3, polybar, rofi, dunst, kitty, xrdb | immediately |
+| GTK apps | immediately - the `gtk-theme` toggle in `theme_init.sh` forces a re-read of `gtk.css` |
+| Qt apps | next launch |
+| Firefox | next launch - `userChrome.css` is parsed during startup |
+| neovim | `:ThemeReload`, or next launch |
+
+A Firefox profile that does not exist yet cannot be themed, so the very first
+run after installing skips it. The next `theme_init.sh` - which i3 runs at
+login - picks it up.
+
 ## Adding a program to the theme
 
 1. Write a function in `writers.py` that takes the palette dict and a path.
-2. Add it to `build_targets()` in `main.py` with a guard directory - the
-   directory that must exist for that program to be considered installed.
+2. Add it to `build_targets()` in `main.py` with a guard - the directory that
+   must exist for that program to count as installed, or a callable returning
+   whether to write, for programs like qt5ct that have no config directory
+   until they are first run. `None` means always write.
 3. If the program reloads at runtime, add that to `theme_init.sh`.
 
 The palette dict has surfaces (`base`, `mantle`, `crust`, `surface0..2`,

@@ -108,10 +108,20 @@ if command -v dunst >/dev/null; then
     setsid dunst >/dev/null 2>&1 &
 fi
 
-# GTK reloads gtk.css when the colour scheme setting changes; nudge it.
+# GTK apps read gtk.css once, at startup. They do re-read it when the theme
+# setting changes, though, so toggling the theme name off and back on is what
+# makes an already-open Thunar repaint. The toggle is two settings changes in
+# a row: GTK only reloads on an actual change, so setting it to the value it
+# already has does nothing.
 if command -v gsettings >/dev/null; then
     gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark' 2>/dev/null
+    gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita' 2>/dev/null
+    gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark' 2>/dev/null
 fi
+
+# Firefox and Qt apps have no reload path at all - Firefox parses userChrome.css
+# during startup and qt5ct's palette is read when the app builds its QPalette.
+# Both pick the new colours up the next time they are launched.
 
 # polybar cannot reload, only restart - launch.sh already kills the old one and
 # starts one bar per connected monitor.

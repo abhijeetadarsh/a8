@@ -139,6 +139,11 @@ PKGS_FONTS=(
 # python-* drive theme_engine, which derives the whole desktop palette from the
 # wallpaper. gnome-themes-extra is what actually provides the Adwaita-dark GTK3
 # theme that gtk-3.0/settings.ini asks for - without it GTK apps stay light.
+#
+# No qt5ct/qt6ct here on purpose: .xinitrc falls back to Qt's gtk3 platform
+# theme, which makes Qt apps read the generated GTK theme. That is two fewer
+# packages for the same result. Install qt6ct if you want an exact Qt palette -
+# the theme engine writes its config as soon as the binary exists.
 PKGS_THEME=(
     python python-numpy python-scikit-learn python-opencv python-matplotlib
     gnome-themes-extra
@@ -645,23 +650,52 @@ do_dotfiles() {
     fi
 }
 
+XINITRC_TAG="# written by postinstall.sh - \`startx\` reads this"
+
 do_xinitrc() {
     step "X session"
-    if [[ -e "$HOME/.xinitrc" && ! -L "$HOME/.xinitrc" ]]; then
-        note "~/.xinitrc already exists, leaving it alone"
+
+    # An .xinitrc we wrote gets rewritten, so an existing install picks up
+    # changes to the block below. Anything else is somebody's own session
+    # setup and is left alone.
+    if [[ -e "$HOME/.xinitrc" && ! -L "$HOME/.xinitrc" ]] &&
+       ! grep -qF "$XINITRC_TAG" "$HOME/.xinitrc"; then
+        note "~/.xinitrc already exists and is not ours, leaving it alone"
+        note "for Qt apps to follow the theme it needs: export QT_QPA_PLATFORMTHEME=gtk3"
         return 0
     fi
-    cat > "$HOME/.xinitrc" <<'EOF'
+
+    cat > "$HOME/.xinitrc" <<EOF
 #!/bin/sh
-# written by postinstall.sh - `startx` reads this
+$XINITRC_TAG
 
 [ -f ~/.Xresources ] && xrdb -merge ~/.Xresources
 [ -f ~/.cache/theme/colors.Xresources ] && xrdb -merge ~/.cache/theme/colors.Xresources
 
+# Qt draws with its own palette and knows nothing about the wallpaper. A
+# platform theme plugin is what bridges that, and it has to be an environment
+# variable because Qt reads it before any app code runs.
+#
+# qt5ct/qt6ct are preferred when installed: the theme engine writes them an
+# explicit palette, so every Qt widget gets an exact colour. Otherwise the
+# gtk3 plugin makes Qt read the GTK theme instead, which the engine also
+# generates - fewer packages, same colours.
+if [ -n "\$(command -v qt6ct)" ]; then
+    export QT_QPA_PLATFORMTHEME=qt6ct
+elif [ -n "\$(command -v qt5ct)" ]; then
+    export QT_QPA_PLATFORMTHEME=qt5ct
+else
+    export QT_QPA_PLATFORMTHEME=gtk3
+fi
+
+# Java's AWT toolkit assumes a reparenting window manager and draws blank
+# windows under i3 without this.
+export _JAVA_AWT_WM_NONREPARENTING=1
+
 exec i3
 EOF
     chmod +x "$HOME/.xinitrc"
-    ok "wrote ~/.xinitrc (startx -> i3)"
+    ok "wrote ~/.xinitrc (startx -> i3, Qt pointed at the generated theme)"
 }
 
 # Generate a plain dark gradient to use as a wallpaper when there are none.
