@@ -992,11 +992,11 @@ do_notifications() {
         rc=1
     }
 
-    # The scripts every notifying keybinding goes through. They are stow
-    # symlinks into the repo, so a missing one means the dotfiles step did not
-    # get as far as this directory.
+    # The scripts the keybindings run - the notifying ones and the help key.
+    # They are stow symlinks into the repo, so a missing one means the dotfiles
+    # step did not get as far as this directory.
     local s
-    for s in notify.sh screenshot.sh volume.sh theme_init.sh monitors.sh; do
+    for s in notify.sh screenshot.sh volume.sh theme_init.sh monitors.sh shortcuts.sh; do
         [[ -x "$HOME/.config/i3/script/$s" ]] || {
             bad "$HOME/.config/i3/script/$s is missing or not executable"
             rc=1
@@ -1406,6 +1406,7 @@ fi
 
 blank
 say "  ${D}notes${N}"
+say "    ${D}\$mod+F1${N}       every keybinding, searchable. Or type ${D}keys${N} in a terminal"
 say "    ${D}\$mod+Shift+w${N}  new wallpaper, and the whole desktop re-themes from it"
 say "    ${D}\$mod+n${N}        ranger"
 say "    ${D}Print${N}         screenshot to ~/Pictures/maim; add Ctrl for the clipboard,"

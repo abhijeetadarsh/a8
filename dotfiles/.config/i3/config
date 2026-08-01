@@ -122,9 +122,22 @@ exec_always --no-startup-id sh -c 'pgrep -x udiskie >/dev/null || udiskie'
 # that is not running: the bar is polybar, whose alsa module follows the mixer
 # by itself, and the bar {} block that would have started i3status is commented
 # out at the bottom of this file.
+#:: Help
+# What every key does, read out of this file - so it cannot drift from it.
+# script/shortcuts.sh prints a table in a terminal and opens the searchable
+# rofi list when there is no terminal to print in, which is what i3's exec
+# gives it. Annotate a binding for it with a `#:` line above the bindsym.
+#: this list
+bindsym $mod+F1 exec --no-startup-id $HOME/.config/i3/script/shortcuts.sh
+
+#:: Sound
+#: volume up
 bindsym XF86AudioRaiseVolume exec --no-startup-id $HOME/.config/i3/script/volume.sh up
+#: volume down
 bindsym XF86AudioLowerVolume exec --no-startup-id $HOME/.config/i3/script/volume.sh down
+#: mute the speakers
 bindsym XF86AudioMute exec --no-startup-id $HOME/.config/i3/script/volume.sh mute
+#: mute the microphone
 bindsym XF86AudioMicMute exec --no-startup-id $HOME/.config/i3/script/volume.sh micmute
 
 # Use Mouse+$mod to drag floating windows to their wanted position
@@ -136,41 +149,58 @@ tiling_drag modifier titlebar
 
 # start a terminal
 # bindsym $mod+Return exec i3-sensible-terminal
+#:: Launching
+#: a terminal (kitty)
 bindsym $mod+Return exec --no-startup-id kitty
 
 # file manager
+#: the file manager (ranger, in kitty)
 bindsym $mod+n exec --no-startup-id kitty -e ranger
 
 # kill focused window
+#:: Windows
+#: close the focused window
 bindsym $mod+q kill
 
 # re-detect monitors after plugging a screen in, then reload
 # --notify: the screens go black for a moment and come back rearranged, and a
 # short popup of what is now where is the only confirmation that it was this
 # key that did it. The run at every i3 start deliberately has no --notify.
+#:: Monitors and workspaces
+#: re-detect the monitors after plugging one in
 bindsym $mod+Shift+m exec --no-startup-id "$HOME/.config/i3/script/monitors.sh --notify && i3-msg reload && $HOME/.config/polybar/shades/launch.sh"
 
 # move focus / the focused window between monitors
+#:: Monitors and workspaces
+#: focus the screen to the left
 bindsym $mod+comma focus output left
+#: focus the screen to the right
 bindsym $mod+period focus output right
+#: move the window to the screen on the left
 bindsym $mod+Shift+comma move container to output left; focus output left
+#: move the window to the screen on the right
 bindsym $mod+Shift+period move container to output right; focus output right
 
 # The only wallpaper key: a new wallpaper, re-themed from it, on every screen.
 # Where it comes from is $WALLPAPER_SOURCE (my_collection, bing or waifu),
 # exported in ~/.xinitrc. theme_init.sh --bing / --waifu / --file still work
 # from a terminal for a one-off from somewhere else.
+#:: Desktop
+#: a new wallpaper, and the whole desktop re-themed from it
 bindsym $mod+Shift+w exec --no-startup-id $HOME/.config/i3/script/theme_init.sh --new
 
 # start dmenu (a program launcher)
 # bindsym $mod+d exec --no-startup-id dmenu_run
 # A more modern dmenu replacement is rofi:
+#:: Launching
+#: $mod+d | the application launcher (rofi)
 bindcode $mod+40 exec "rofi -modi drun,run -show drun"
 # There also is i3-dmenu-desktop which only displays applications shipping a
 # .desktop file. It is a wrapper around dmenu, so you need that installed.
 # bindcode $mod+40 exec --no-startup-id i3-dmenu-desktop
 
 # change focus
+#:: Focus and move
 bindsym $mod+h focus left
 bindsym $mod+j focus down
 bindsym $mod+k focus up
@@ -203,20 +233,28 @@ bindsym $mod+Shift+l move right
 # bindsym $mod+v split v
 
 # enter fullscreen mode for the focused container
+#:: Windows
+#: fullscreen on/off
 bindsym $mod+f fullscreen toggle
 
 # change container layout (stacked, tabbed, toggle split)
+#: stack the windows in this container
 bindsym $mod+s layout stacking
+#: tab the windows in this container
 bindsym $mod+w layout tabbed
+#: back to a split layout
 bindsym $mod+e layout toggle split
 
 # toggle tiling / floating
+#: float / tile the focused window
 bindsym $mod+Shift+space floating toggle
 
 # change focus between tiling / floating windows
+#: focus the floating windows, or the tiled ones
 bindsym $mod+space focus mode_toggle
 
 # focus the parent container
+#: focus the container this window is in
 bindsym $mod+a focus parent
 
 # focus the child container
@@ -236,6 +274,7 @@ set $ws9 "9"
 set $ws10 "10"
 
 # switch to workspace
+#:: Monitors and workspaces
 bindsym $mod+1 workspace number $ws1
 bindsym $mod+2 workspace number $ws2
 bindsym $mod+3 workspace number $ws3
@@ -280,12 +319,16 @@ for_window [class="feh"] fullscreen
 # `reload; exec notify...` would not do: i3 runs the whole chain regardless of
 # whether the reload succeeded, so it would report success over the top of the
 # nagbar explaining the failure.
+#:: i3 itself
+#: reload the config
 bindsym $mod+Shift+c exec --no-startup-id sh -c 'if i3-msg -q reload; then $HOME/.config/i3/script/notify.sh -u low -T 2000 -t i3 -i view-refresh "i3" "config reloaded"; else $HOME/.config/i3/script/notify.sh -u critical -t i3 -i dialog-error "i3" "config refused - see the error at the top of the screen"; fi'
 
 # restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
 # The notification outlives the restart: i3 re-execs itself, dunst does not.
+#: restart i3, keeping the layout
 bindsym $mod+Shift+r exec --no-startup-id sh -c 'if i3-msg -q restart; then $HOME/.config/i3/script/notify.sh -u low -T 2000 -t i3 -i view-refresh "i3" "restarted"; else $HOME/.config/i3/script/notify.sh -u critical -t i3 -i dialog-error "i3" "restart refused - the config has an error"; fi'
 # exit i3 (logs you out of your X session)
+#: log out of i3 - it asks first
 bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -B 'Yes, exit i3' 'i3-msg exit'"
 
 # resize window (you can also use the mouse for that)
@@ -308,11 +351,16 @@ mode "resize" {
         bindsym Right resize grow width 10 px or 10 ppt
 
         # back to normal: Enter or Escape or $mod+r
+        #: back to normal
         bindsym Return mode "default"
+        #: back to normal
         bindsym Escape mode "default"
+        #: back to normal
         bindsym $mod+r mode "default"
 }
 
+#:: Windows
+#: resize mode - then hjkl or the arrows, Escape to leave
 bindsym $mod+r mode "resize"
 
 # Start i3bar to display a workspace bar (plus the system information i3status
@@ -360,15 +408,24 @@ for_window [class=".*"] border pixel 2
 # tells a cancelled selection apart from a failed capture, and shows the shot
 # it just took as the notification's icon. Middle-clicking that popup opens
 # the file (mouse_middle_click = do_action, in dunstrc).
+#:: Screenshots
+#: everything, every monitor
 bindsym Print                  exec --no-startup-id $HOME/.config/i3/script/screenshot.sh full
+#: this monitor only
 bindsym $mod+Shift+Print       exec --no-startup-id $HOME/.config/i3/script/screenshot.sh monitor
+#: the focused window
 bindsym $mod+Print             exec --no-startup-id $HOME/.config/i3/script/screenshot.sh window
+#: drag a region
 bindsym Shift+Print            exec --no-startup-id $HOME/.config/i3/script/screenshot.sh region
 
 ## Clipboard Screenshots
+#: everything, to the clipboard
 bindsym Ctrl+Print             exec --no-startup-id $HOME/.config/i3/script/screenshot.sh full --clip
+#: this monitor, to the clipboard
 bindsym Ctrl+$mod+Shift+Print  exec --no-startup-id $HOME/.config/i3/script/screenshot.sh monitor --clip
+#: the focused window, to the clipboard
 bindsym Ctrl+$mod+Print        exec --no-startup-id $HOME/.config/i3/script/screenshot.sh window --clip
+#: a region, to the clipboard
 bindsym Ctrl+Shift+Print       exec --no-startup-id $HOME/.config/i3/script/screenshot.sh region --clip
 
 # GTK theming is settings.ini (dark Adwaita) plus the generated gtk.css, which
@@ -383,6 +440,8 @@ bindsym Ctrl+Shift+Print       exec --no-startup-id $HOME/.config/i3/script/scre
 # all. Ctrl rather than Shift because hjkl keeps all four of both rows:
 # $mod+hjkl focuses, $mod+Shift+hjkl moves.
 # Locking before suspend is wired to xss-lock further up.
+#:: Desktop
+#: lock the screen
 bindsym $mod+Ctrl+l exec --no-startup-id $HOME/.config/i3/script/i3lock-color.sh
 
 # i3-gaps

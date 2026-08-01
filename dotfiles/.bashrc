@@ -10,6 +10,10 @@ alias ls='eza --icons'
 alias grep='grep --color=auto'
 alias cls='clear'
 alias claude='claude --dangerously-skip-permissions'
+
+# The i3 keybindings, printed. The same script draws the searchable rofi list
+# on $mod+F1 - it prints here because stdout is a terminal. `keys shot` filters.
+alias keys='$HOME/.config/i3/script/shortcuts.sh'
 PS1='[\u@\h \W]\$ '
 
 # starship

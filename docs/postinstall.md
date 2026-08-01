@@ -166,6 +166,53 @@ sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=block --
 Then it mounts at `/run/media/$USER/TESTSTICK` with `uid=1000`. Remove the
 rule and `sudo losetup -d /dev/loop0` afterwards.
 
+## What the keys do
+
+`$mod+F1`, or `keys` in a terminal. Both are
+[`.config/i3/script/shortcuts.sh`](../dotfiles/.config/i3/script/shortcuts.sh),
+and it decides which of the two you meant by whether stdout is a terminal: you
+ran it in a shell, so it prints; i3 ran it, so there is no terminal, so it opens
+rofi.
+
+```
+Screenshots
+  Print                     everything, every monitor
+  Super+Shift+Print         this monitor only
+  Super+Print               the focused window
+  Shift+Print               drag a region
+```
+
+**rofi rather than an image of a keymap**, because the question is never "show
+me all the keys", it is "what was the screenshot one again" - and rofi filters
+as you type. `shot` narrows 50 bindings to 8. It is a viewer: Enter closes it
+and runs nothing, because a help window in which a keystroke can end your X
+session is not one you would open in the middle of something.
+
+**There is no second list to keep in step.** It parses `~/.config/i3/config`,
+so it cannot disagree with the keyboard - a hand-written cheatsheet is wrong
+within a week, and silently. A binding with no description at all still
+appears, described by the i3 command it runs.
+
+Descriptions are comments next to the binding they describe:
+
+```
+#:: Screenshots                  a heading; everything after it is in it
+#: this monitor only             the description of the next binding
+bindsym $mod+Shift+Print exec --no-startup-id ~/.config/i3/script/screenshot.sh monitor
+
+#: $mod+d | the launcher (rofi)  key | description, for bindcode, where the
+bindcode $mod+40 exec "rofi ..."  config holds a keycode nobody can read
+```
+
+Two things are collapsed automatically, because the alternative is a cheatsheet
+nobody reads:
+
+- Runs that differ only in a digit - the ten workspace keys, twice - become
+  `Super+1 … 0   workspace number 1-10`.
+- Different keys with the same description become one row:
+  `Enter / Escape / Super+r   back to normal`. i3 binds hjkl *and* the arrows
+  in resize mode, which is eight rows for four things.
+
 ## Notifications
 
 Most i3 keybindings act without opening a window. A screenshot is written, a
@@ -611,6 +658,8 @@ To unlink everything, swap `--restow` for `--delete`.
   means the whole chain works. Nothing at all: run
   `~/.config/i3/script/notify.sh test` from a terminal, which passes the
   daemon's error through instead of swallowing it.
+- **The keys** - press `$mod+F1` for the list of them, or type `keys`. See
+  [What the keys do](#what-the-keys-do).
 
 ## Network, from the bar
 
