@@ -62,6 +62,7 @@ ORDER_FILE="$HOME/.config/i3/monitor-order"
 APPLY=1
 PRINT=0
 LIST_MODES=0
+XRANDR_ONLY=0
 
 declare -A MODE=()          # output -> WxH the user asked for
 declare -A RATE=()          # output -> refresh rate the user asked for
@@ -90,6 +91,14 @@ set_rate() {
 while (( $# )); do
     case "$1" in
         --no-apply) APPLY=0 ;;
+        # The mirror image of --no-apply: arrange the screens and write
+        # nothing. This is what the LightDM greeter runs, as root, before
+        # anyone has logged in - it needs the layout, and it must not create
+        # root-owned files in a home directory it does not belong to.
+        --xrandr-only) XRANDR_ONLY=1 ;;
+        # Which layout file to read. The greeter case again: root's HOME is
+        # not the one holding the layout, so the path has to be given.
+        --order-file)  shift; ORDER_FILE="${1:-}" ;;
         --print)    PRINT=1; APPLY=0 ;;
         --modes)    LIST_MODES=1; APPLY=0 ;;
         --order)    shift; ORDER_OVERRIDE="${1:-}" ;;
@@ -98,15 +107,21 @@ while (( $# )); do
         --rate)     shift; set_rate "${1:-}" ;;
         --help|-h)
             cat <<EOF
-usage: $0 [--print] [--no-apply] [--modes]
-          [--order "OUT1 OUT2"] [--primary OUT]
+usage: $0 [--print] [--no-apply] [--xrandr-only] [--modes]
+          [--order "OUT1 OUT2"] [--order-file PATH] [--primary OUT]
           [--mode OUT=WxH[@RATE]] [--rate OUT=RATE]
 
   --print    show the layout it would write, change nothing
   --no-apply write monitors.conf but do not run xrandr
+  --xrandr-only
+             the opposite: arrange the screens, write nothing. What the
+             LightDM greeter runs before login, where there is no i3 to
+             configure and no home directory to write into
   --modes    list the resolutions and rates each screen supports
   --order    left-to-right monitor order for this run only,
              e.g. --order "HDMI-1 eDP-1"
+  --order-file
+             read the layout from this path instead of the default
   --primary  which output gets xrandr's --primary flag. Independent of
              position: it does not move a screen or change the workspace split
   --mode     resolution for one output, e.g. --mode HDMI-1=2560x1440@144
@@ -541,6 +556,15 @@ if (( APPLY )); then
 fi
 
 # --- 4. write the i3 include ------------------------------------------------
+#
+# Everything below this point is about i3. Under --xrandr-only there is no i3
+# and no home directory to write into, and the screens are already arranged,
+# so the job is done.
+
+if (( XRANDR_ONLY )); then
+    printf 'monitors: %s arranged: %s\n' "${#CONNECTED[@]}" "${ORDERED[*]}"
+    exit 0
+fi
 
 mkdir -p "$(dirname "$OUT")"
 {

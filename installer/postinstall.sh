@@ -657,6 +657,67 @@ EOF
 
     ok "wrote $GREETER_CONF"
 
+    # --- the greeter's monitor layout ---------------------------------------
+    #
+    # The greeter's X server is not your session's. i3 is what runs
+    # monitors.sh, and i3 does not exist yet at the login screen, so the
+    # greeter comes up on whatever X picked on its own - every output stacked
+    # at 0,0, no primary, the login box landing somewhere that has nothing to
+    # do with where the screens actually sit. Logging in then applies the real
+    # layout, which is why it looks correct only *after* the password.
+    #
+    # display-setup-script runs as root on the greeter's display before the
+    # greeter starts, which is the one hook that can fix this.
+    #
+    # It runs a *copy* of monitors.sh, installed root-owned, rather than the
+    # one in the repo. LightDM runs this as root, and pointing root at a
+    # script inside a home directory means anything that can write there picks
+    # up root at the next boot. The copy is refreshed on every postinstall
+    # run, so editing the repo's copy and re-running keeps them in step.
+    #
+    # --order-file is needed because root's HOME is not yours: the layout
+    # lives in your home, and this is the only way the greeter can read it.
+    # That file is data, not code - it is parsed into xrandr arguments, never
+    # executed - so a root process reading it is not a way back in.
+    local mon_src="$REPO/dotfiles/.config/i3/script/monitors.sh"
+    if [[ -f "$mon_src" ]]; then
+        sudo install -m 0755 -o root -g root "$mon_src" /usr/local/bin/i3-monitors
+
+        # A wrapper, because the arguments have to come from somewhere and
+        # LightDM's own config is not the place to be quoting a command line.
+        sudo tee /etc/lightdm/display-setup.sh >/dev/null <<EOF
+#!/bin/sh
+$GREETER_TAG
+#
+# Runs as root on the greeter's X display, before the greeter appears, so the
+# login screen sits on the same monitors your session uses. Never fails the
+# login screen: a layout problem must not be the reason you cannot log in.
+/usr/local/bin/i3-monitors --xrandr-only --order-file "$HOME/.config/i3/monitor-order" || true
+exit 0
+EOF
+        sudo chmod 0755 /etc/lightdm/display-setup.sh
+
+        # A drop-in rather than an edit of lightdm.conf: the packaged file
+        # belongs to pacman, and this way an upgrade cannot quietly drop it.
+        sudo mkdir -p /etc/lightdm/lightdm.conf.d
+        sudo tee /etc/lightdm/lightdm.conf.d/10-monitor-layout.conf >/dev/null <<EOF
+$GREETER_TAG
+#
+# Arrange the screens before the greeter draws itself. See display-setup.sh.
+#
+# There is deliberately no active-monitor in $GREETER_CONF to go with
+# this. Left unset, the greeter puts the login window on the primary output -
+# which the script above has just set correctly - so it follows the layout by
+# itself and keeps working when a monitor is unplugged. Naming an output here
+# would be one more place to update, and wrong the moment you undock.
+[Seat:*]
+display-setup-script=/etc/lightdm/display-setup.sh
+EOF
+        ok "greeter now arranges the screens before it draws (display-setup-script)"
+    else
+        warn "$mon_src is missing - the greeter cannot arrange the screens"
+    fi
+
     # Enabled last, and only once the greeter is actually configured: enabling
     # it before that is how you get a boot into a broken login screen.
     if sudo systemctl enable lightdm.service >/dev/null 2>&1; then
