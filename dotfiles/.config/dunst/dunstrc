@@ -14,7 +14,20 @@
     width = (300, 420)
     height = (0, 300)
     origin = top-right
-    offset = (14, 14)
+
+    # (right margin, top margin). The vertical one has to clear polybar.
+    #
+    # dunst places itself against the monitor, not against the work area: it
+    # does not read the _NET_WM_STRUT polybar reserves, so "14 from the top"
+    # means 14 from the physical top edge and the first notification lands on
+    # the bar. 28 is polybar's `height` in
+    # .config/polybar/shades/config.ini, and both bars there inherit it; the
+    # remaining 14 is the same margin the right edge gets, so the popup sits
+    # under the bar with the same gap it has from the screen edge.
+    #
+    # If you change the bar's height, change this too - nothing derives one
+    # from the other, and the failure is a notification drawn over the clock.
+    offset = (14, 42)
     scale = 0
     notification_limit = 5
 
