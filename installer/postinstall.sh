@@ -742,6 +742,53 @@ do_dotfiles() {
     fi
 }
 
+do_neovim() {
+    step "neovim plugins"
+
+    if ! command -v nvim >/dev/null; then
+        bad "neovim is not installed - skipping (re-run after installing it)"
+        return 1
+    fi
+
+    local data="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
+
+    # This config is treesitter and a colourscheme - syntax highlighting, and
+    # nothing that needs a language server. Machines that ran an earlier
+    # version of this repo still have mason's servers on disk, and mason lives
+    # outside lazy's control: no lazy command will ever clean them up, so they
+    # would sit there being downloaded-but-unreachable forever.
+    if [[ -d "$data/mason" ]]; then
+        rm -rf "$data/mason" &&
+            note "removed mason's language servers - nothing uses them any more"
+    fi
+
+    # Do on a fresh machine what would otherwise only happen the first time you
+    # happened to open nvim, and undo drift on an existing one:
+    #
+    #   install  clone anything in lua/plugins that is not on disk yet
+    #   restore  check every plugin out at the commit in lazy-lock.json
+    #   clean    delete clones that are no longer in the spec (the LSP stack)
+    #
+    # All three are no-ops once the tree matches the lockfile, so re-running
+    # this script costs nothing. Headless lazy runs its tasks synchronously,
+    # which is the only reason a one-shot invocation like this works at all.
+    if nvim --headless "+Lazy! install" "+Lazy! restore" "+Lazy! clean" +qa \
+        >/dev/null 2>&1; then
+        ok "plugins match lazy-lock.json"
+    else
+        warn "headless plugin sync failed"
+        note "not fatal - nvim bootstraps lazy.nvim itself on first launch"
+        return 1
+    fi
+
+    # Parsers are the actual highlighting, and they are built per machine
+    # rather than pinned, so a lockfile match does not prove they exist.
+    if [[ ! -d "$data/lazy/nvim-treesitter" ]]; then
+        warn "nvim-treesitter is missing - syntax highlighting will be off"
+        return 1
+    fi
+}
+
 XINITRC_TAG="# written by postinstall.sh - \`startx\` reads this"
 XPROFILE_TAG="# written by postinstall.sh - both startx and lightdm read this"
 
@@ -1048,6 +1095,7 @@ do_dotfiles  || FAILURES=$((FAILURES + 1))
 do_xinitrc   || FAILURES=$((FAILURES + 1))
 do_lightdm   || FAILURES=$((FAILURES + 1))
 do_theme     || FAILURES=$((FAILURES + 1))
+do_neovim    || FAILURES=$((FAILURES + 1))
 
 mkdir -p "$STATE_DIR"
 date '+%Y-%m-%d %H:%M' > "$LAST_RUN"
@@ -1075,6 +1123,6 @@ say "  ${D}notes${N}"
 say "    ${D}\$mod+Shift+w${N}  new wallpaper, and the whole desktop re-themes from it"
 say "    ${D}\$mod+n${N}        ranger"
 say "    ${D}--repair${N}      re-run with this to pick packages to reinstall"
-say "    ${D}neovim${N}        bootstraps lazy.nvim and its plugins on first launch"
+say "    ${D}neovim${N}        treesitter highlighting only - no LSP, plugins pinned by lazy-lock.json"
 say "    ${D}dotfiles${N}      edit them in $REPO/dotfiles, changes apply immediately"
 blank
