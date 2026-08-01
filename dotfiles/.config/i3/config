@@ -67,6 +67,25 @@ exec --no-startup-id dex --autostart --environment i3
 # so the machine would suspend with the screen unlocked.
 exec --no-startup-id xss-lock --transfer-sleep-lock -- $HOME/.config/i3/script/i3lock-color.sh --nofork
 
+# What idling actually does, stated rather than inherited.
+#
+# X's built-in defaults are 600s for everything, which means the screen blanks
+# and the panel powers off in the same instant: the lock screen you are about
+# to need is drawn onto a display that is already dark, and if the panel then
+# fails to wake you cannot tell a wedged machine from a sleeping one.
+#
+#   xset s 600 600      blank, and fire xss-lock -> the locker, at 10 minutes
+#   xset dpms 0 0 900   panel off at 15 minutes; no separate standby/suspend
+#                       stage, those do nothing useful on a laptop panel
+#
+# The five minutes between them is the point: the locker is up and visible
+# before anything is powered down, so a black screen at 12 minutes means a
+# real fault rather than normal behaviour.
+#
+# The panel not coming back from that is a separate, hardware-level bug - see
+# /etc/modprobe.d/i915-psr.conf, which postinstall.sh writes.
+exec_always --no-startup-id xset s 600 600 dpms 0 0 900
+
 # NetworkManager is the most popular way to manage wireless networks on Linux,
 # and nm-applet is a desktop environment-independent system tray GUI for it.
 exec --no-startup-id nm-applet

@@ -667,6 +667,116 @@ EOF
     return 0
 }
 
+# Root-owned bits that decide what happens when the machine goes idle, and
+# what you can do about it when that goes wrong.
+#
+# The bug this exists for: leave the desktop alone, DPMS powers the panel off,
+# and it never comes back. The kernel keeps running - the box answers, it just
+# has no picture - so the only way out was holding the power button, which also
+# threw away the journal's last few minutes and any evidence with it.
+do_power() {
+    step "display power"
+
+    # `write_root <path> <<EOF` - write a root-owned config only when it would
+    # actually change, so a re-run is silent and initramfs work is skipped.
+    # Returns 1 when the file was already correct.
+    _write_root() {
+        local path="$1" content
+        content="$(cat)"
+        if [[ -f "$path" ]] && [[ "$(sudo cat "$path" 2>/dev/null)" == "$content" ]]; then
+            return 1
+        fi
+        sudo mkdir -p "$(dirname "$path")"
+        printf '%s\n' "$content" | sudo tee "$path" >/dev/null
+        return 0
+    }
+
+    local initramfs=0
+
+    # --- the actual fix -----------------------------------------------------
+    # Panel Self Refresh lets the display controller stop scanning out and let
+    # the panel redraw itself from its own memory. Waking from it is where Ice
+    # Lake gets it wrong: the pipe comes back but the panel never does, so you
+    # are left with a black screen on a machine that is otherwise fine.
+    #
+    # enable_psr=0 turns it off. The cost is a little battery on an idle
+    # static screen; the benefit is that the screen comes back. If you would
+    # rather keep some of it, enable_psr=1 forces PSR1 and disables PSR2,
+    # which is the half that is usually to blame - change it here, not by hand
+    # in /etc, so the next machine gets the same thing.
+    #
+    # This is a module option rather than a kernel parameter because i915 is
+    # loaded from the initramfs by the `kms` hook, long before /etc is
+    # mounted. mkinitcpio's `modconf` hook copies /etc/modprobe.d into the
+    # image, which is what makes it take effect that early - so the initramfs
+    # has to be rebuilt when this file changes, or the option is simply
+    # ignored at boot.
+    if _write_root /etc/modprobe.d/i915-psr.conf <<'EOF'
+# written by postinstall.sh
+# Ice Lake panels can fail to come back from PSR: black screen at idle on a
+# machine that is still running. See docs/postinstall.md.
+options i915 enable_psr=0
+EOF
+    then
+        ok "wrote /etc/modprobe.d/i915-psr.conf (PSR off)"
+        initramfs=1
+    else
+        note "/etc/modprobe.d/i915-psr.conf already correct"
+    fi
+
+    if ! grep -qE '^HOOKS=.*\bmodconf\b' /etc/mkinitcpio.conf 2>/dev/null; then
+        warn "mkinitcpio has no 'modconf' hook - /etc/modprobe.d is not in the initramfs"
+        note "add modconf to HOOKS in /etc/mkinitcpio.conf or the PSR setting will not apply"
+    elif (( initramfs )); then
+        note "rebuilding the initramfs so the module option applies at boot..."
+        if sudo mkinitcpio -P >/dev/null 2>&1; then
+            ok "initramfs rebuilt - takes effect on the next boot"
+        else
+            bad "mkinitcpio failed - run 'sudo mkinitcpio -P' and read the output"
+        fi
+    fi
+
+    # --- being able to recover ---------------------------------------------
+    # Arch ships kernel.sysrq=16 (sync only), which is no use mid-hang. With
+    # this you can hold Alt+SysRq and press R E I S U B - unraw, terminate,
+    # kill, sync, unmount, reboot - and get a clean shutdown out of a machine
+    # whose display or session is gone. That is the difference between losing
+    # the journal to a power-button hold and still having the evidence.
+    if _write_root /etc/sysctl.d/99-sysrq.conf <<'EOF'
+# written by postinstall.sh
+# Full SysRq, so Alt+SysRq+REISUB can shut down cleanly when the display or
+# the session is wedged. 16 (the default) is sync only.
+kernel.sysrq=1
+EOF
+    then
+        sudo sysctl --system >/dev/null 2>&1
+        ok "SysRq enabled - Alt+SysRq+REISUB reboots cleanly without the power button"
+    else
+        note "SysRq already enabled"
+    fi
+
+    # --- keeping the evidence ----------------------------------------------
+    # journald buffers up to 5 minutes before it syncs to disk, so a power
+    # button hold takes the last few minutes with it - exactly the minutes
+    # that would say what went wrong. 30s costs a handful of extra writes.
+    if _write_root /etc/systemd/journald.conf.d/10-sync-interval.conf <<'EOF'
+# written by postinstall.sh
+# Sync the journal every 30s instead of every 5min, so a hard poweroff does
+# not take the last few minutes of logs - the ones explaining the hang.
+[Journal]
+SyncIntervalSec=30s
+EOF
+    then
+        sudo systemctl restart systemd-journald >/dev/null 2>&1
+        ok "journal syncs every 30s - a forced poweroff no longer eats the last minutes"
+    else
+        note "journald sync interval already set"
+    fi
+
+    unset -f _write_root
+    return 0
+}
+
 do_dotfiles() {
     step "dotfiles"
 
@@ -1091,6 +1201,7 @@ FAILURES=0
 do_update
 do_packages  || FAILURES=$((FAILURES + 1))
 do_services  || FAILURES=$((FAILURES + 1))
+do_power     || FAILURES=$((FAILURES + 1))
 do_dotfiles  || FAILURES=$((FAILURES + 1))
 do_xinitrc   || FAILURES=$((FAILURES + 1))
 do_lightdm   || FAILURES=$((FAILURES + 1))
