@@ -136,7 +136,19 @@ PKGS_TOOLS=(
 )
 
 # --- apps the i3 workspace assigns expect ----------------------------------
-PKGS_APPS=( firefox thunar exo )   # exo provides exo-open, used by polybar modules
+#
+# speech-dispatcher is what Firefox talks to for the Web Speech API - reader
+# mode's "Listen", and any site that calls speechSynthesis. Without it those
+# controls are simply absent or silent, with nothing in the UI to explain why.
+# espeak-ng is only an optdep of speech-dispatcher, but it is the synthesiser
+# that actually produces sound: speech-dispatcher on its own is a routing
+# layer with no voice behind it.
+PKGS_APPS=(
+    firefox
+    speech-dispatcher espeak-ng   # Firefox text-to-speech, see above
+    mpv                           # video player; .config/mpv/mpv.conf tunes it
+    thunar exo                    # exo provides exo-open, used by polybar modules
+)
 
 # --- fonts + icons ----------------------------------------------------------
 PKGS_FONTS=(
