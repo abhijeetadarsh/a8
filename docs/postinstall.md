@@ -24,23 +24,178 @@ Re-running it is the supported way to fix a half-finished install.
 2. **Packages** - the X server, pipewire, i3, polybar, rofi, picom, kitty,
    ranger, neovim, fonts, and the Python stack the theme engine needs. The
    list is grouped by purpose at the top of the script; that is the one place
-   to edit when you want to add something.
+   to edit when you want to add something. `speech-dispatcher` and `espeak-ng`
+   ride along with Firefox - they are what its "Listen" control and any site
+   using the Web Speech API talk to, and without both there is no voice and no
+   error to explain it. `mpv` is the video player, configured in
+   [`dotfiles/.config/mpv/mpv.conf`](../dotfiles/.config/mpv/mpv.conf).
 3. **AUR** - builds `jump-bin` and `i3lock-color` with makepkg directly; no
    AUR helper is installed (see below).
 4. **Services** - NetworkManager, bluetooth, and the pipewire user services.
-5. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
+5. **Display power** - three root-owned files: `i915 enable_psr=0` (see
+   [Black screen at idle](#black-screen-at-idle) below), full SysRq so a wedged
+   session can still be shut down cleanly, and a 30s journal sync so a forced
+   poweroff stops eating the logs that explain it. Rebuilds the initramfs only
+   when the module option actually changed.
+6. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
-6. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
+7. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
    ways into it. See below; a file either of them wrote is rewritten on a
    re-run, one you wrote yourself is left alone.
-7. **Login screen** - LightDM plus the GTK greeter, configured and enabled, and
-   the directory the greeter reads its theme from.
-8. **Palette** - generates the desktop colour scheme from a wallpaper, so the
+8. **Login screen** - LightDM plus the GTK greeter, configured and enabled, the
+   directory the greeter reads its theme from, and a `display-setup-script` so
+   the greeter arranges the monitors before it draws (see
+   [The greeter's monitor layout](#the-greeters-monitor-layout)).
+9. **Palette** - generates the desktop colour scheme from a wallpaper, so the
    first login lands on a themed desktop rather than an i3 config error.
    i3's other generated include, `monitors.conf`, gets an empty placeholder for
    the same reason: the script cannot work out the real monitor layout without
    a running X server, and `monitors.sh` rewrites it at every i3 start anyway.
+10. **neovim plugins** - installs and pins them from
+    [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
+    deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
+    built by this script rather than by whenever you first happen to open nvim.
+
+## The greeter's monitor layout
+
+**Symptom:** the login window ignores your monitor arrangement, and everything
+snaps into place the moment you log in.
+
+**Cause:** the greeter's X server is not your session's. `monitors.sh` is run
+by i3, and at the login screen there is no i3 yet - so X arranges the outputs
+however it likes, with no primary and no positions, and the login box lands
+accordingly. Logging in starts i3, i3 runs `monitors.sh`, and the layout you
+configured finally appears.
+
+**Fix:** LightDM's `display-setup-script` runs as root on the greeter's
+display before the greeter starts. `postinstall.sh` writes
+`/etc/lightdm/lightdm.conf.d/10-monitor-layout.conf` pointing at
+`/etc/lightdm/display-setup.sh`, which runs:
+
+```sh
+/usr/local/bin/i3-monitors --xrandr-only --order-file "$HOME/.config/i3/monitor-order"
+```
+
+Three details that are not incidental:
+
+- **`--xrandr-only`** is a `monitors.sh` mode that arranges the screens and
+  writes nothing. The normal path would create `monitors.conf` - as root, in
+  whichever home it thinks it has.
+- **`/usr/local/bin/i3-monitors` is a root-owned copy**, refreshed on every
+  postinstall run. LightDM runs this as root, and pointing root at a script
+  inside `$HOME` hands root to anything that can write there. Edit
+  `dotfiles/.config/i3/script/monitors.sh` and re-run postinstall; the copy is
+  the one place in this repo that does not update just by editing the file.
+- **`--order-file` with an absolute path**, because root's `$HOME` is not
+  yours. The layout file is read as data and parsed into xrandr arguments, and
+  is never executed.
+
+There is deliberately **no `active-monitor`** in the greeter config. Unset, the
+greeter puts the login window on the primary output - which the script above
+has just set - so it follows the layout on its own and still does the right
+thing when you undock. Naming an output there would be a second place to keep
+in sync, and wrong as soon as that monitor is unplugged.
+
+Test it without rebooting - it is exactly what LightDM runs:
+
+```sh
+sudo DISPLAY=:0 XAUTHORITY=~/.Xauthority /etc/lightdm/display-setup.sh
+```
+
+## Black screen at idle
+
+**Symptom:** leave the machine alone, come back to a black screen, and no key
+or mouse movement brings it back - but the box is clearly still running, so the
+only way out is holding the power button.
+
+**Cause on this hardware:** Panel Self Refresh. The Ice Lake display controller
+hands the panel off to refresh itself, and coming back out of that fails - the
+kernel keeps running, it just never gets a picture again. The tell is that the
+machine is *alive*: it answers SSH, Caps Lock still toggles its LED. A dead
+kernel is a different bug (on this laptop, suspect nouveau's runtime power
+management on the unused MX330 dGPU).
+
+**Fix:** `postinstall.sh` writes `options i915 enable_psr=0` to
+`/etc/modprobe.d/i915-psr.conf` and rebuilds the initramfs. That last part is
+not optional - `i915` loads from the initramfs via the `kms` hook, long before
+`/etc` exists, so the option only reaches it because mkinitcpio's `modconf`
+hook copies `/etc/modprobe.d` into the image. **It takes effect on the next
+boot, not immediately.** Confirm with:
+
+```sh
+cat /sys/module/i915/parameters/enable_psr   # 0 = off, -1 = kernel default
+```
+
+If you would rather keep half of it, `enable_psr=1` forces PSR1 and disables
+PSR2, which is usually the guilty half. Edit the value in `do_power()` in
+`postinstall.sh` rather than in `/etc`, so the next machine inherits it.
+
+**Idle timings** are now stated in the i3 config rather than inherited from
+X's defaults, which blank the screen and cut the panel's power in the same
+instant:
+
+```
+exec_always --no-startup-id xset s 600 600 dpms 0 0 900
+```
+
+Lock at 10 minutes, panel off at 15. The gap means the locker is up and
+visible before anything powers down, so a black screen at 12 minutes is a
+fault rather than normal behaviour.
+
+**If it happens again:** `Alt+SysRq+R E I S U B` now reboots cleanly (full
+SysRq is enabled), instead of a power-button hold. Then read the tail of the
+previous boot - with the 30s journal sync it survives:
+
+```sh
+journalctl -b -1 -p warning --no-pager | tail -40
+```
+
+## neovim
+
+The config is deliberately small: **treesitter for syntax highlighting** and
+the wallpaper-derived colourscheme, plus telescope, nvim-tree, lualine, a
+splash screen and toggleterm. There is **no LSP** - no mason, no lspconfig, no
+none-ls, no completion engine - so nothing downloads language servers behind
+your back and there is nothing to configure per language.
+
+Adding a plugin means dropping a file in
+[`dotfiles/.config/nvim/lua/plugins/`](../dotfiles/.config/nvim/lua/plugins);
+removing one means deleting that file and re-running this script, which cleans
+the clone up. Commit `lazy-lock.json` after `:Lazy update` to keep other
+machines on the same commits.
+
+`nvim-treesitter` is pinned to its `master` branch on purpose. Upstream's
+default branch is now `main`, a rewrite with a different API, and following it
+would leave every buffer unhighlighted.
+
+## Screen tearing
+
+picom is the only thing in this stack that syncs to the vblank. The display is
+driven by Xorg's `modesetting` driver, which on this xorg-server has no
+`TearFree` option at all - the string is not in `modesetting_drv.so`, so an
+`xorg.conf.d` snippet setting it is silently ignored. There is no second layer
+to fall back on.
+
+So tearing means one of two things:
+
+- **picom is not syncing.** Check it:
+
+  ```sh
+  picom --config ~/.config/picom/picom.conf --log-level=info --log-file=/tmp/picom.log
+  ```
+
+  A working setup logs `Using vblank scheduler: present.` and lists the
+  `SGI_swap_control` / `OML_sync_control` GLX extensions as present. `vsync`
+  and `unredir-if-possible = false` are both set in
+  [`picom.conf`](../dotfiles/.config/picom/picom.conf); the second one matters
+  as much as the first, because an unredirected window scans out unsynced no
+  matter what `vsync` says.
+
+- **Something escaped the compositor.** Fullscreen video and games are the
+  usual culprits. `mpv.conf` pins `vo=gpu` and `x11-bypass-compositor=no` so
+  mpv stays composited even fullscreen; anything else that tears only in
+  fullscreen is asking to bypass picom the same way.
 
 ## Two ways in, one environment
 
