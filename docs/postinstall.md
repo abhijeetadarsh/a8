@@ -180,8 +180,8 @@ So everything that acts without a visible result reports through one place:
 
 | key | what it says |
 | --- | --- |
-| `Print`, `Shift+Print`, `$mod+Print` | the shot, as a thumbnail, with its filename and size. Middle-click the popup to open it |
-| the same three with `Ctrl` | that the image is on the clipboard |
+| `Print`, `$mod+Shift+Print`, `$mod+Print`, `Shift+Print` | the shot, as a thumbnail, with its filename and size. Middle-click the popup to open it |
+| the same four with `Ctrl` | that the image is on the clipboard |
 | `$mod+Shift+w` | the wallpaper you got, with the image as the icon - or why you did not get one |
 | `XF86Audio{Raise,Lower}Volume`, `Mute`, `MicMute` | the level, as a progress bar |
 | `$mod+Shift+m` | the monitor layout that is now on screen |
@@ -225,8 +225,27 @@ affected by this; they are only capped by `max_icon_size`.
 ### Screenshots
 
 [`screenshot.sh`](../dotfiles/.config/i3/script/screenshot.sh) is one script
-behind all six Print bindings: three things to capture (screen, focused window,
-dragged region) with and without `Ctrl` for "to the clipboard instead".
+behind all eight Print bindings: four things to capture, each with and without
+`Ctrl` for "to the clipboard instead".
+
+| key | captures |
+| --- | --- |
+| `Print` | everything - every monitor in one image |
+| `$mod+Shift+Print` | one monitor: the one you are working on |
+| `$mod+Print` | the focused window |
+| `Shift+Print` | a region you drag |
+
+**One monitor** is the useful default on a multi-head machine, where plain
+`Print` is a 3840x1080 image with two desktops in it. It captures the output
+the *pointer* is on, which is the screen you are looking at: i3 warps the
+cursor onto an output when focus moves there, so the pointer follows the
+keyboard without being asked to. If the pointer is somewhere no output covers,
+it falls back to the primary rather than refusing.
+
+From a terminal you can name one instead - `screenshot.sh monitor HDMI-1` -
+and naming one that is not plugged in lists the ones that are. The output name
+goes in the notification, because with two similar screens the thumbnail does
+not always say which one you got.
 
 Things it does that the `maim` one-liners in the config could not:
 

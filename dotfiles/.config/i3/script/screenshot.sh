@@ -3,12 +3,14 @@
 # screenshot.sh - take one, and say so.
 #
 #   screenshot.sh full            the whole X screen, every monitor
+#   screenshot.sh monitor [NAME]  one monitor: the one the pointer is on,
+#                                 or the output you name (eDP-1, HDMI-1...)
 #   screenshot.sh window          just the focused window
 #   screenshot.sh region          drag a rectangle
 #
 #   --clip                        into the clipboard instead of a file
 #
-# The six Print bindings in the i3 config are these three modes with and
+# The eight Print bindings in the i3 config are these four modes with and
 # without --clip.
 #
 # Why a script rather than three `maim` calls in the config:
@@ -44,22 +46,36 @@ CLIP_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/i3-screenshot-clipboard.png"
 
 MODE=""
 CLIP=0
+WANT_OUTPUT=""
 
 while (( $# )); do
     case "$1" in
-        full|screen)   MODE=full ;;
-        window|active) MODE=window ;;
-        region|select) MODE=region ;;
-        --clip|-c)     CLIP=1 ;;
+        full|screen)          MODE=full ;;
+        monitor|output|head)  MODE=monitor ;;
+        window|active)        MODE=window ;;
+        region|select)        MODE=region ;;
+        --clip|-c)            CLIP=1 ;;
         --help|-h)
             awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' "$0"
             exit 0 ;;
-        *) printf 'screenshot: unknown argument: %s (try --help)\n' "$1" >&2; exit 2 ;;
+        # A bare word after `monitor` is an output name. Only there: anywhere
+        # else it is a typo, and a mode that quietly ignored one would take the
+        # wrong screenshot rather than say so.
+        *)
+            if [[ "$MODE" == monitor && -z "$WANT_OUTPUT" ]]; then
+                WANT_OUTPUT="$1"
+            else
+                printf 'screenshot: unknown argument: %s (try --help)\n' "$1" >&2
+                exit 2
+            fi ;;
     esac
     shift
 done
 
-[[ -z "$MODE" ]] && { printf 'screenshot: pick a mode: full, window or region\n' >&2; exit 2; }
+[[ -z "$MODE" ]] && {
+    printf 'screenshot: pick a mode: full, monitor, window or region\n' >&2
+    exit 2
+}
 
 fail() {
     "$NOTIFY" -u critical -i dialog-error -t screenshot "Screenshot failed" "$1"
@@ -72,8 +88,78 @@ command -v maim >/dev/null || fail "maim is not installed"
 
 MAIM=( maim )
 
+# Every connected, enabled output as "name WxH+X+Y", in xrandr's order. Same
+# parse the other scripts in here use: the geometry is the one field on the
+# ` connected` line that looks like a geometry, because what sits between the
+# name and it varies with primary, rotation and so on.
+outputs() {
+    xrandr --query 2>/dev/null | awk '
+        / connected/ {
+            for (i = 3; i <= NF; i++)
+                if ($i ~ /^[0-9]+x[0-9]+\+-?[0-9]+\+-?[0-9]+$/) { print $1, $i; break }
+        }'
+}
+
+# Which monitor "this one" means.
+#
+# The pointer, not i3's focused workspace, and they are the same thing here:
+# i3 warps the cursor onto an output when focus moves there (mouse_warping is
+# `output` by default), so the pointer is on the screen you are working on.
+# Reading it needs xdotool, which the window mode already needs, rather than
+# i3-msg plus a JSON parser.
+pointer_output() {
+    local x y name geo ox oy ow oh
+    eval "$(xdotool getmouselocation --shell 2>/dev/null)" || return 1
+    x="${X:-}"; y="${Y:-}"
+    [[ "$x" =~ ^-?[0-9]+$ && "$y" =~ ^-?[0-9]+$ ]] || return 1
+
+    while read -r name geo; do
+        ow="${geo%%x*}"
+        oh="${geo#*x}"; oh="${oh%%+*}"
+        ox="${geo#*+}"; ox="${ox%%+*}"
+        oy="${geo##*+}"
+        (( x >= ox && x < ox + ow && y >= oy && y < oy + oh )) && {
+            printf '%s %s' "$name" "$geo"
+            return 0
+        }
+    done < <(outputs)
+    return 1
+}
+
 case "$MODE" in
     full)
+        ;;
+    monitor)
+        command -v xrandr >/dev/null || fail "xrandr is not installed"
+
+        if [[ -n "$WANT_OUTPUT" ]]; then
+            GEO="$(outputs | awk -v o="$WANT_OUTPUT" '$1 == o { print $2; exit }')"
+            [[ -n "$GEO" ]] || fail "$WANT_OUTPUT is not a connected output. There is: $(
+                outputs | awk '{ printf "%s%s", sep, $1; sep = ", " }')"
+            OUT_NAME="$WANT_OUTPUT"
+        else
+            read -r OUT_NAME GEO < <(pointer_output)
+            # No pointer, or it is somewhere no output covers - which happens
+            # on a mismatched layout, where the desktop is larger than the
+            # screens. The primary output is the honest answer to "which one",
+            # and taking a screenshot of it beats refusing to take one.
+            if [[ -z "${GEO:-}" ]]; then
+                read -r OUT_NAME GEO < <(
+                    xrandr --query 2>/dev/null | awk '
+                        / connected primary/ {
+                            for (i = 3; i <= NF; i++)
+                                if ($i ~ /^[0-9]+x[0-9]+\+-?[0-9]+\+-?[0-9]+$/) {
+                                    print $1, $i; exit
+                                }
+                        }')
+            fi
+            [[ -n "${GEO:-}" ]] || read -r OUT_NAME GEO < <(outputs | head -1)
+            [[ -n "${GEO:-}" ]] || fail "no connected outputs to capture"
+        fi
+
+        # maim's geometry is in root-window coordinates, which is exactly what
+        # xrandr reports, so the two need no translation between them.
+        MAIM+=( --geometry "$GEO" )
         ;;
     window)
         command -v xdotool >/dev/null || fail "xdotool is not installed"
@@ -126,6 +212,10 @@ if (( RC != 0 )) || [[ ! -s "$TMP" ]]; then
 fi
 
 SIZE="$(du -h "$TMP" | cut -f1)"
+
+# Which screen it was, when that was a choice. With two monitors showing
+# similar things, the thumbnail alone does not always answer it.
+[[ "$MODE" == monitor ]] && SIZE="${OUT_NAME}  ·  $SIZE"
 
 # --- clipboard --------------------------------------------------------------
 

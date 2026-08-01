@@ -346,22 +346,30 @@ for_window [class=".*"] border pixel 2
 
 # Screenshots
 #
-# Three things to capture - the screen, the focused window, a dragged region -
-# each either saved to ~/Pictures/maim or put straight on the clipboard. Ctrl
-# is the "to the clipboard instead" modifier.
+# Four things to capture - everything, one monitor, the focused window, a
+# dragged region - each either saved to ~/Pictures/maim or put straight on the
+# clipboard. Ctrl is the "to the clipboard instead" modifier.
 #
-# All six go through script/screenshot.sh, which names the file so it sorts,
+# Plain Print is still every monitor, which on this machine is a 3840x1080
+# image with two desktops in it. $mod+Shift+Print is the one screen you are
+# working on: script/screenshot.sh takes the output the pointer is on, and i3
+# warps the pointer onto whichever output has focus, so it is the screen you
+# are looking at. `screenshot.sh monitor HDMI-1` names one from a terminal.
+#
+# All eight go through script/screenshot.sh, which names the file so it sorts,
 # tells a cancelled selection apart from a failed capture, and shows the shot
 # it just took as the notification's icon. Middle-clicking that popup opens
 # the file (mouse_middle_click = do_action, in dunstrc).
-bindsym Print             exec --no-startup-id $HOME/.config/i3/script/screenshot.sh full
-bindsym $mod+Print        exec --no-startup-id $HOME/.config/i3/script/screenshot.sh window
-bindsym Shift+Print       exec --no-startup-id $HOME/.config/i3/script/screenshot.sh region
+bindsym Print                  exec --no-startup-id $HOME/.config/i3/script/screenshot.sh full
+bindsym $mod+Shift+Print       exec --no-startup-id $HOME/.config/i3/script/screenshot.sh monitor
+bindsym $mod+Print             exec --no-startup-id $HOME/.config/i3/script/screenshot.sh window
+bindsym Shift+Print            exec --no-startup-id $HOME/.config/i3/script/screenshot.sh region
 
 ## Clipboard Screenshots
-bindsym Ctrl+Print        exec --no-startup-id $HOME/.config/i3/script/screenshot.sh full --clip
-bindsym Ctrl+$mod+Print   exec --no-startup-id $HOME/.config/i3/script/screenshot.sh window --clip
-bindsym Ctrl+Shift+Print  exec --no-startup-id $HOME/.config/i3/script/screenshot.sh region --clip
+bindsym Ctrl+Print             exec --no-startup-id $HOME/.config/i3/script/screenshot.sh full --clip
+bindsym Ctrl+$mod+Shift+Print  exec --no-startup-id $HOME/.config/i3/script/screenshot.sh monitor --clip
+bindsym Ctrl+$mod+Print        exec --no-startup-id $HOME/.config/i3/script/screenshot.sh window --clip
+bindsym Ctrl+Shift+Print       exec --no-startup-id $HOME/.config/i3/script/screenshot.sh region --clip
 
 # GTK theming is settings.ini (dark Adwaita) plus the generated gtk.css, which
 # repaints Adwaita's accent to match the wallpaper. Nothing to exec here - the
