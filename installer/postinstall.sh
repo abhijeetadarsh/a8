@@ -150,6 +150,50 @@ PKGS_APPS=(
     thunar exo                    # exo provides exo-open, used by polybar modules
 )
 
+# --- removable drives -------------------------------------------------------
+#
+# Plug a USB stick in and it mounts itself, as you, under /run/media/$USER.
+#
+# udisks2 is the daemon that does the mounting; it does not automount on its
+# own, it just exposes the machinery over D-Bus. udiskie is the small client
+# that watches for new devices and calls it - .config/udiskie/config.yml has
+# the rules, and the i3 config starts it.
+#
+# Mounting through udisks2 rather than a udev rule and `mount` is what makes
+# the drives yours. udisks2 asks polkit, polkit sees an active local session,
+# and the mount is made on your behalf: FAT and NTFS get uid= so the files are
+# writable, and ext4 keeps its own ownership instead of landing root-owned the
+# way a root-run `mount` leaves it. It is also what makes unmounting possible
+# without sudo, which matters more than it sounds - a drive you cannot eject
+# is a drive you unplug dirty.
+#
+# The filesystem tools are the other half of "any drive": the kernel can read
+# these, but udisks2 needs the userspace helpers to mount, check and label
+# them. Without ntfs-3g an NTFS disk simply refuses to mount, with nothing in
+# the notification to say why.
+PKGS_DRIVES=(
+    udisks2 udiskie
+    ntfs-3g               # NTFS - the one every external disk ships with
+    exfatprogs            # exFAT - large SD cards and cross-platform drives
+    dosfstools            # FAT32 - USB sticks, EFI partitions
+
+    # Phones, which are not drives.
+    #
+    # An Android phone in file-transfer mode speaks MTP: one USB interface of
+    # class 06, no block device, nothing for udisks2 to mount. Plugging one in
+    # with only the packages above produces exactly nothing - no tray entry, no
+    # notification, no /dev node - and it looks like the automounting is
+    # broken when it is working correctly on a device it cannot see.
+    #
+    # gvfs is the userspace layer that handles those: gvfs-mtp mounts the
+    # phone under /run/user/$UID/gvfs and Thunar lists it under Devices.
+    #
+    # gvfs earns its place twice over. Thunar's device sidebar *is* gvfs -
+    # without it Thunar shows no removable media at all and a mounted USB
+    # stick can only be reached by typing /run/media/$USER into the path bar.
+    gvfs gvfs-mtp
+)
+
 # --- fonts + icons ----------------------------------------------------------
 PKGS_FONTS=(
     ttf-fantasque-sans-mono       # the i3 bar/title font
@@ -193,6 +237,7 @@ PKG_GROUPS=(
     "screenshots|${PKGS_SHOT[*]}"
     "tools|${PKGS_TOOLS[*]}"
     "apps|${PKGS_APPS[*]}"
+    "drives|${PKGS_DRIVES[*]}"
     "fonts|${PKGS_FONTS[*]}"
     "theming|${PKGS_THEME[*]}"
     "AUR|${AUR_PKGS[*]}"
@@ -1296,5 +1341,6 @@ say "    ${D}\$mod+Shift+w${N}  new wallpaper, and the whole desktop re-themes f
 say "    ${D}\$mod+n${N}        ranger"
 say "    ${D}--repair${N}      re-run with this to pick packages to reinstall"
 say "    ${D}neovim${N}        treesitter highlighting only - no LSP, plugins pinned by lazy-lock.json"
+say "    ${D}usb drives${N}    mount themselves at /run/media/$USER - eject from the tray icon"
 say "    ${D}dotfiles${N}      edit them in $REPO/dotfiles, changes apply immediately"
 blank

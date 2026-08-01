@@ -1,0 +1,66 @@
+# udiskie - plug a drive in, it mounts itself.
+#
+# udisks2 does the mounting and owns the policy; udiskie is the small daemon
+# that notices a new device and asks it to. The i3 config starts it.
+#
+# Mounts land under /run/media/$USER/<label>, made on your behalf rather than
+# by root: FAT and NTFS get a uid= so the files are writable, ext4 keeps its
+# own ownership, and you can eject without sudo.
+
+program_options:
+
+  automount: true
+  notify:    true
+
+  # Only show a tray icon while something is actually mounted. There is no
+  # value in a permanent icon for a laptop that usually has nothing plugged
+  # in, and the polybar tray is narrow. Click it to eject.
+  tray: auto
+
+  # Flat rather than nested: with one or two drives a submenu per device is a
+  # click for nothing.
+  menu: flat
+
+  # What opens when you pick "Open" on a device, or click the notification.
+  file_manager: thunar
+
+  # LUKS drives ask here rather than silently failing to mount. builtin:gui is
+  # udiskie's own GTK prompt - no zenity, no gnome-keyring, nothing extra to
+  # install. Passwords are never cached: password_cache is left off, so an
+  # unlocked drive that is re-plugged asks again.
+  password_prompt: builtin:gui
+
+device_config:
+
+  # Only external drives. udisks2 marks everything on the machine's own
+  # controllers HintSystem=true - the root filesystem, the EFI partition, any
+  # second internal disk - and automounting those is at best pointless and at
+  # worst a way to have /boot mounted at a second path while it is in use.
+  #
+  # This rule is why the feature is "automount external drives" rather than
+  # "automount partitions". Matching on the udisks hint means it keeps working
+  # for hardware this machine does not have yet: an internal NVMe added later
+  # is excluded because udisks says it is internal, not because it was named.
+  - is_systeminternal: true
+    ignore: true
+
+  # Nothing here for swap or unpartitioned disks on purpose. udiskie only ever
+  # mounts devices udisks2 reports as a filesystem, so those are already out -
+  # a rule for them would just be a second copy of a builtin one.
+
+notifications:
+
+  # Seconds. The plug/unplug popups are confirmations, not messages to read -
+  # the default leaves them on screen long enough to be in the way.
+  timeout: 3
+
+  # The device was found and the device was mounted are the same event to a
+  # human, and they arrive as two popups. Keep the one that says the drive is
+  # ready to use.
+  device_added: false
+  device_removed: false
+
+  # A failure is the one notification worth reading, so it gets longer than
+  # the confirmations. Not -1: that means "libnotify's default", which here is
+  # dunst's, which is shorter than this.
+  job_failed: 10

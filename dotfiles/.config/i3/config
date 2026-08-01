@@ -90,6 +90,27 @@ exec_always --no-startup-id xset s 600 600 dpms 0 0 900
 # and nm-applet is a desktop environment-independent system tray GUI for it.
 exec --no-startup-id nm-applet
 
+# Automount external drives. udisks2 does the mounting, udiskie is what calls
+# it - the rules are in .config/udiskie/config.yml.
+#
+# exec_always with a guard, not a bare exec. Both run at login; the
+# difference is $mod+Shift+r, which re-runs exec_always and not exec. So exec
+# alone means a udiskie that died stays dead until you log out, and a bare
+# exec_always means a second one every restart, each racing the others to
+# mount the same disk. The pgrep guard gives the useful half of both:
+# restarting i3 revives it if it is gone and does nothing if it is not.
+#
+# (Reload - $mod+Shift+c - does not re-run exec_always at all here, despite
+# what the name suggests: killing picom and reloading does not bring picom
+# back either. Restart is the one that re-runs these.)
+#
+# The explicit `sh -c` is load-bearing and not a style choice. i3 runs an exec
+# line as `sh -c "exec <line>"`, and that `exec` replaces the shell with the
+# first command - so written bare, the shell *becomes* pgrep and the `|| ...`
+# half is never reached. It fails silently: no error, no udiskie, and a config
+# that looks right. Wrapping the logic in its own shell is what survives it.
+exec_always --no-startup-id sh -c 'pgrep -x udiskie >/dev/null || udiskie'
+
 # Use pactl to adjust volume in PulseAudio.
 set $refresh_i3status killall -SIGUSR1 i3status
 bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +10% && $refresh_i3status

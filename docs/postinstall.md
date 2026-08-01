@@ -28,7 +28,9 @@ Re-running it is the supported way to fix a half-finished install.
    ride along with Firefox - they are what its "Listen" control and any site
    using the Web Speech API talk to, and without both there is no voice and no
    error to explain it. `mpv` is the video player, configured in
-   [`dotfiles/.config/mpv/mpv.conf`](../dotfiles/.config/mpv/mpv.conf).
+   [`dotfiles/.config/mpv/mpv.conf`](../dotfiles/.config/mpv/mpv.conf), and the
+   `drives` group is what makes external disks mount themselves (see
+   [Removable drives](#removable-drives)).
 3. **AUR** - builds `jump-bin` and `i3lock-color` with makepkg directly; no
    AUR helper is installed (see below).
 4. **Services** - NetworkManager, bluetooth, and the pipewire user services.
@@ -56,6 +58,106 @@ Re-running it is the supported way to fix a half-finished install.
     [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
     deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
     built by this script rather than by whenever you first happen to open nvim.
+
+## Removable drives
+
+Plug a USB stick, SD card or external disk in and it mounts itself at
+`/run/media/$USER/<label>`, with a dunst popup saying so. A tray icon appears
+while something is mounted; click it to eject. Nothing to run, nothing to
+`sudo`.
+
+Two pieces, because they do different jobs:
+
+- **udisks2** does the mounting and owns the policy. It does not automount on
+  its own - it only exposes the machinery over D-Bus. There is no service to
+  enable: it is D-Bus activated, so `systemctl is-enabled udisks2` says
+  `disabled` on a working system.
+- **udiskie** is the small daemon that watches for new devices and calls it.
+  The i3 config starts it; the rules live in
+  [`.config/udiskie/config.yml`](../dotfiles/.config/udiskie/config.yml).
+
+Going through udisks2 rather than a udev rule and `mount` is what makes the
+drives *yours*. udisks2 asks polkit, polkit sees an active local session, and
+the mount is made on your behalf - FAT and NTFS get `uid=` so the files are
+writable, ext4 keeps its own ownership instead of landing root-owned, and you
+can eject without `sudo`. A drive you cannot eject is a drive you unplug
+dirty.
+
+**Only external drives**, by way of one rule in `config.yml`:
+
+```yaml
+device_config:
+  - is_systeminternal: true
+    ignore: true
+```
+
+`is_systeminternal` is udisks2's own `HintSystem` flag, so this keeps working
+for hardware the machine does not have yet - an internal disk added later is
+excluded because udisks says it is internal, not because it was named here.
+
+The filesystem tools in `PKGS_DRIVES` are the other half of "any drive": the
+kernel can read these, but udisks2 needs the userspace helpers to mount and
+check them. Without `ntfs-3g` an NTFS disk simply refuses to mount, and the
+notification does not say why.
+
+### Phones are not drives
+
+Plug an Android phone in and **nothing happens** - no tray entry, no
+notification, no `/dev` node - and that is correct rather than broken. A phone
+in file-transfer mode speaks MTP: a single USB interface of class 06, with no
+block device behind it. udisks2 mounts block devices, so there is nothing for
+it to see.
+
+`gvfs` + `gvfs-mtp` are what handle it. With those installed the phone appears
+in **Thunar's sidebar under Devices**; click it to mount. From a terminal:
+
+```sh
+gio mount -li | grep -B6 activation_root      # find the mtp:// URI
+gio mount "mtp://OnePlus_OnePlus_Nord_4_adea1d8a/"
+ls /run/user/$UID/gvfs/mtp:host=*/            # then browse it like a directory
+```
+
+Two things that are usually the real problem when it still does not show up:
+
+- **The phone must be unlocked, and set to "File transfer" / MTP** rather than
+  "Charging only". The mode is a prompt on the phone, and changing it makes
+  the device re-enumerate - you can watch that in `dmesg`, where the phone
+  disconnects and comes back with a new device number.
+- **Thunar caches its volume monitor at startup.** Installing gvfs while
+  Thunar is already running leaves the sidebar empty until `thunar -q` and a
+  relaunch. This only bites once, on the run that first installs gvfs.
+
+Without `usbutils` installed there is no `lsusb`, but sysfs answers the same
+question - class `06` means MTP, `08` would be mass storage:
+
+```sh
+cat /sys/bus/usb/devices/*/product
+cat /sys/bus/usb/devices/3-4:1.0/bInterfaceClass
+```
+
+### Testing without hardware
+
+Test the block-device path using a loopback file - udisks2 handles it through
+the same path as a real disk:
+
+```sh
+truncate -s 64M /tmp/test.img && mkfs.vfat -n TESTSTICK /tmp/test.img
+udisksctl loop-setup -f /tmp/test.img
+```
+
+Note that this on its own proves less than it looks: udisks2 reports loop
+devices as `HintSystem: true`, so the rule above correctly ignores them and
+nothing mounts. To exercise the automount path you have to make the loop
+device look external first, with a temporary udev rule:
+
+```sh
+echo 'SUBSYSTEM=="block", KERNEL=="loop0", ENV{UDISKS_SYSTEM}="0", ENV{UDISKS_AUTO}="1"' |
+    sudo tee /etc/udev/rules.d/99-test-loop.rules
+sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=block --sysname-match=loop0
+```
+
+Then it mounts at `/run/media/$USER/TESTSTICK` with `uid=1000`. Remove the
+rule and `sudo losetup -d /dev/loop0` afterwards.
 
 ## The greeter's monitor layout
 
