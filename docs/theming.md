@@ -68,8 +68,18 @@ other mode there would mean a reboot silently threw away your wallpaper.
 ```
 
 `theme_init.sh` runs the generator and then reloads everything that can be
-reloaded without a logout: `xrdb`, `SIGUSR1` to kitty, a dunst restart, a GTK
-theme-name toggle, a polybar relaunch and `i3-msg reload`.
+reloaded without a logout: `xrdb`, `SIGUSR1` to kitty, `dunstctl reload`, a GTK
+theme-name toggle, a polybar relaunch and `i3-msg reload`. It then says which
+wallpaper you got, as a notification with the image itself as its icon - see
+[Notifications](postinstall.md#notifications).
+
+dunst is reloaded rather than restarted, and the drop-in files are named on the
+`dunstctl reload` command line rather than left to the daemon. Both details
+matter for the same reason: a bare reload re-reads the files dunst was
+*started* with, and on a first login the theme drop-in is written after the
+daemon is already up. Restarting instead would work too, but it drops the
+notification history and briefly leaves the bus name owned by a daemon that is
+exiting - which is where the "new wallpaper" notification would land.
 
 **All of these outputs are generated.** None of them is in git, and editing one
 by hand lasts until the next wallpaper change.

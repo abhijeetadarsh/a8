@@ -28,8 +28,17 @@ set -uo pipefail
 ENGINE="$HOME/.config/polybar/shades/theme_engine/main.py"
 CACHE="$HOME/.cache/theme"
 STATE="$CACHE/wallpaper"
+NOTIFY="$HOME/.config/i3/script/notify.sh"
 
-die() { printf 'theme_init: %s\n' "$*" >&2; exit 1; }
+# Everything here is normally run from a keybinding, where stderr goes nowhere.
+# A failed $mod+Shift+w used to be indistinguishable from a key that is not
+# bound: same wallpaper, no message, nothing in any log. Say so on screen.
+die() {
+    printf 'theme_init: %s\n' "$*" >&2
+    [[ -x "$NOTIFY" ]] && "$NOTIFY" -u critical -i dialog-error -t wallpaper \
+        "Wallpaper" "$*"
+    exit 1
+}
 
 # fetch_wallpaper.sh can set a different image on each monitor. Re-running feh
 # with one image here would flatten that, so it is skippable.
@@ -62,10 +71,23 @@ if [[ "${1:-}" == "--new" ]]; then
     esac
 fi
 
+# Whether the desktop is about to look different. --reload puts back the
+# wallpaper that is already on screen, at every single login, so it is the one
+# mode that must not announce itself; every other mode is something you asked
+# for and want confirmation of.
+ANNOUNCE=1
+[[ "${1:---reload}" == "--reload" ]] && ANNOUNCE=0
+
 # Default to --reload: a bare run should not change which wallpaper you have.
 case "${1:---reload}" in
     --bing)
         shift
+        # A network round trip, which on a bad connection is the twenty seconds
+        # of curl's --max-time with nothing on screen. Say what is happening
+        # under the same tag the result will use, so the answer replaces the
+        # question rather than piling up under it.
+        [[ -x "$NOTIFY" ]] && "$NOTIFY" -u low -t wallpaper -T 20000 \
+            -i preferences-desktop-wallpaper "Wallpaper" "fetching today's Bing image..."
         # Same path as --waifu: fetches, stores, applies, then calls back in
         # here with --file. Errors are not swallowed - a failed download used
         # to look exactly like a working one.
@@ -83,6 +105,8 @@ case "${1:---reload}" in
         ;;
     --waifu)
         shift
+        [[ -x "$NOTIFY" ]] && "$NOTIFY" -u low -t wallpaper -T 20000 \
+            -i preferences-desktop-wallpaper "Wallpaper" "fetching from waifu.im..."
         # Fetches, stores, applies and then calls back in here with --file.
         exec "$HOME/.config/i3/script/fetch_wallpaper.sh" "$@"
         ;;
@@ -182,8 +206,37 @@ fi
 # kitty re-reads its config on SIGUSR1, so open terminals recolour in place.
 pkill -USR1 -x kitty 2>/dev/null
 
-# dunst has to restart to pick up a changed drop-in.
-if command -v dunst >/dev/null; then
+# dunst, whose 99-theme.conf drop-in has just been rewritten.
+#
+# `dunstctl reload` re-reads the config of the running daemon. Restarting it
+# also works and is what this used to do, but it throws away the notification
+# history and - the reason it matters here - leaves a window in which the bus
+# name still belongs to a daemon that is on its way out. This script sends a
+# notification of its own a few lines further down, and that is exactly the
+# window it would land in.
+#
+# The file list is passed explicitly, in the order dunst reads them itself:
+# a bare `dunstctl reload` re-reads the files the daemon was *started* with,
+# and a drop-in that did not exist yet at that point is not one of them. On a
+# first login that is precisely the case - the palette is generated after the
+# daemon is up - and the whole desktop would be themed except its
+# notifications. Later files win, so the theme drop-in comes last.
+DUNST_RELOADED=0
+if command -v dunstctl >/dev/null; then
+    dunst_conf=()
+    [[ -f "$HOME/.config/dunst/dunstrc" ]] && dunst_conf+=("$HOME/.config/dunst/dunstrc")
+    for f in "$HOME"/.config/dunst/dunstrc.d/*.conf; do
+        [[ -f "$f" ]] && dunst_conf+=("$f")
+    done
+    if (( ${#dunst_conf[@]} )) && dunstctl reload "${dunst_conf[@]}" >/dev/null 2>&1; then
+        DUNST_RELOADED=1
+    fi
+fi
+
+# Fallback for a dunst too old for dunstctl reload (before 1.9), and for one
+# that is not running at all. The notification at the end of this script waits
+# for the new daemon to answer before it sends - see notify.sh -w.
+if (( ! DUNST_RELOADED )) && command -v dunst >/dev/null; then
     pkill -x dunst 2>/dev/null
     setsid dunst >/dev/null 2>&1 &
 fi
@@ -223,6 +276,16 @@ fi
 # i3 last: it re-reads colors.conf and repaints every border.
 if command -v i3-msg >/dev/null; then
     i3-msg -q reload 2>/dev/null
+fi
+
+# Say which one you got, with the image itself as the icon.
+#
+# After everything else, not before: the palette this notification is drawn in
+# is the one that was just generated, and dunst has to have reloaded to use it.
+# -w because the fallback path above may have just restarted the daemon.
+if (( ANNOUNCE )) && [[ -x "$NOTIFY" && -n "${WALLPAPER:-}" && -f "$WALLPAPER" ]]; then
+    "$NOTIFY" -w -t wallpaper -T 5000 -i "$WALLPAPER" \
+        "Wallpaper" "$(basename "$WALLPAPER")"
 fi
 
 exit 0

@@ -63,6 +63,20 @@ APPLY=1
 PRINT=0
 LIST_MODES=0
 XRANDR_ONLY=0
+NOTIFY_ME=0
+
+NOTIFY="$HOME/.config/i3/script/notify.sh"
+
+# Off unless asked for. i3 runs this at every start as exec_always, and a
+# "here are your screens" popup at every login is noise about something you can
+# already see. $mod+Shift+m is the case worth reporting: you plugged a monitor
+# in, the screens went black for a moment, and the only other evidence that
+# anything happened is whether the layout looks right.
+notify_layout() {
+    (( NOTIFY_ME )) || return 0
+    [[ -x "$NOTIFY" ]] || return 0
+    "$NOTIFY" -t monitors "$@"
+}
 
 declare -A MODE=()          # output -> WxH the user asked for
 declare -A RATE=()          # output -> refresh rate the user asked for
@@ -99,6 +113,7 @@ while (( $# )); do
         # Which layout file to read. The greeter case again: root's HOME is
         # not the one holding the layout, so the path has to be given.
         --order-file)  shift; ORDER_FILE="${1:-}" ;;
+        --notify)   NOTIFY_ME=1 ;;
         --print)    PRINT=1; APPLY=0 ;;
         --modes)    LIST_MODES=1; APPLY=0 ;;
         --order)    shift; ORDER_OVERRIDE="${1:-}" ;;
@@ -107,12 +122,14 @@ while (( $# )); do
         --rate)     shift; set_rate "${1:-}" ;;
         --help|-h)
             cat <<EOF
-usage: $0 [--print] [--no-apply] [--xrandr-only] [--modes]
+usage: $0 [--print] [--no-apply] [--xrandr-only] [--modes] [--notify]
           [--order "OUT1 OUT2"] [--order-file PATH] [--primary OUT]
           [--mode OUT=WxH[@RATE]] [--rate OUT=RATE]
 
   --print    show the layout it would write, change nothing
   --no-apply write monitors.conf but do not run xrandr
+  --notify   put the resulting layout on screen as a notification. What
+             \$mod+Shift+m uses; left off for the run at every i3 start
   --xrandr-only
              the opposite: arrange the screens, write nothing. What the
              LightDM greeter runs before login, where there is no i3 to
@@ -160,6 +177,7 @@ mapfile -t CONNECTED < <(printf '%s\n' "$XQUERY" | awk '/ connected/ {print $1}'
 
 if (( ${#CONNECTED[@]} == 0 )); then
     printf 'monitors: no connected outputs\n' >&2
+    notify_layout -u critical -i dialog-error "Displays" "no connected outputs"
     exit 1
 fi
 
@@ -540,6 +558,8 @@ if (( APPLY )); then
 
     if ! xrandr "${args[@]}" 2>/dev/null; then
         printf 'monitors: xrandr refused the layout, retrying with preferred modes\n' >&2
+        notify_layout -u normal -i dialog-warning \
+            "Displays" "xrandr refused the requested modes - falling back to the preferred ones"
         # Drop every mode and rate and try again. A layout with the wrong
         # refresh rate beats a session with no working screen.
         args=()
@@ -637,3 +657,31 @@ PY
 fi
 
 printf 'monitors: %s -> %s\n' "${CONNECTED[*]}" "$OUT"
+
+# --- 6. say what happened ---------------------------------------------------
+#
+# From a fresh xrandr --query rather than from the plan: the screens have just
+# been rearranged, and what is worth putting on screen is what they are now,
+# not what was asked for. The two differ exactly when something was refused,
+# which is the case a notification is for.
+
+if (( NOTIFY_ME )); then
+    XQUERY="$(xrandr --query)"
+    prim="$(current_primary)"
+    body=""
+    n=0
+    while IFS=$'\t' read -r x o res rate; do
+        n=$(( n + 1 ))
+        # xrandr says 59.93; a notification says 60.
+        [[ "$rate" =~ ^[0-9.]+$ ]] && rate="$(printf '%.0f' "$rate")"
+        [[ -n "$body" ]] && body+=$'\n'
+        body+="$(printf '%-9s %s @ %sHz%s' "$o" "$res" "$rate" \
+                 "$([[ "$o" == "$prim" ]] && printf '  •')")"
+    done < <(current_layout)
+
+    if (( n == 1 )); then
+        notify_layout -u low -T 4000 -i video-display "1 screen" "$body"
+    else
+        notify_layout -u low -T 4000 -i video-display "$n screens, left to right" "$body"
+    fi
+fi

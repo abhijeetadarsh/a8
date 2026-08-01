@@ -111,12 +111,21 @@ exec --no-startup-id nm-applet
 # that looks right. Wrapping the logic in its own shell is what survives it.
 exec_always --no-startup-id sh -c 'pgrep -x udiskie >/dev/null || udiskie'
 
-# Use pactl to adjust volume in PulseAudio.
-set $refresh_i3status killall -SIGUSR1 i3status
-bindsym XF86AudioRaiseVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ +10% && $refresh_i3status
-bindsym XF86AudioLowerVolume exec --no-startup-id pactl set-sink-volume @DEFAULT_SINK@ -10% && $refresh_i3status
-bindsym XF86AudioMute exec --no-startup-id pactl set-sink-mute @DEFAULT_SINK@ toggle && $refresh_i3status
-bindsym XF86AudioMicMute exec --no-startup-id pactl set-source-mute @DEFAULT_SOURCE@ toggle && $refresh_i3status
+# Volume, through script/volume.sh rather than pactl directly.
+#
+# The script exists for two things pactl on its own does not do: it clamps at
+# 100% instead of letting `+10%` climb to a distorted 160, and it puts the
+# level on screen as a progress bar. Holding a key redraws one popup rather
+# than stacking one per press - see script/notify.sh.
+#
+# The `&& $refresh_i3status` these lines used to carry was signalling a program
+# that is not running: the bar is polybar, whose alsa module follows the mixer
+# by itself, and the bar {} block that would have started i3status is commented
+# out at the bottom of this file.
+bindsym XF86AudioRaiseVolume exec --no-startup-id $HOME/.config/i3/script/volume.sh up
+bindsym XF86AudioLowerVolume exec --no-startup-id $HOME/.config/i3/script/volume.sh down
+bindsym XF86AudioMute exec --no-startup-id $HOME/.config/i3/script/volume.sh mute
+bindsym XF86AudioMicMute exec --no-startup-id $HOME/.config/i3/script/volume.sh micmute
 
 # Use Mouse+$mod to drag floating windows to their wanted position
 floating_modifier $mod
@@ -136,7 +145,10 @@ bindsym $mod+n exec --no-startup-id kitty -e ranger
 bindsym $mod+q kill
 
 # re-detect monitors after plugging a screen in, then reload
-bindsym $mod+Shift+m exec --no-startup-id "$HOME/.config/i3/script/monitors.sh && i3-msg reload && $HOME/.config/polybar/shades/launch.sh"
+# --notify: the screens go black for a moment and come back rearranged, and a
+# short popup of what is now where is the only confirmation that it was this
+# key that did it. The run at every i3 start deliberately has no --notify.
+bindsym $mod+Shift+m exec --no-startup-id "$HOME/.config/i3/script/monitors.sh --notify && i3-msg reload && $HOME/.config/polybar/shades/launch.sh"
 
 # move focus / the focused window between monitors
 bindsym $mod+comma focus output left
@@ -259,9 +271,20 @@ for_window [class="mpv"] floating enable
 for_window [class="feh"] fullscreen
 
 # reload the configuration file
-bindsym $mod+Shift+c reload
+#
+# Through i3-msg rather than the bare `reload` command, because a reload that
+# worked and a reload that did not look identical from the keyboard: the
+# desktop does not change either way. i3-msg exits non-zero when i3 refuses the
+# config, so the two can be told apart and said out loud.
+#
+# `reload; exec notify...` would not do: i3 runs the whole chain regardless of
+# whether the reload succeeded, so it would report success over the top of the
+# nagbar explaining the failure.
+bindsym $mod+Shift+c exec --no-startup-id sh -c 'if i3-msg -q reload; then $HOME/.config/i3/script/notify.sh -u low -T 2000 -t i3 -i view-refresh "i3" "config reloaded"; else $HOME/.config/i3/script/notify.sh -u critical -t i3 -i dialog-error "i3" "config refused - see the error at the top of the screen"; fi'
+
 # restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
-bindsym $mod+Shift+r restart
+# The notification outlives the restart: i3 re-execs itself, dunst does not.
+bindsym $mod+Shift+r exec --no-startup-id sh -c 'if i3-msg -q restart; then $HOME/.config/i3/script/notify.sh -u low -T 2000 -t i3 -i view-refresh "i3" "restarted"; else $HOME/.config/i3/script/notify.sh -u critical -t i3 -i dialog-error "i3" "restart refused - the config has an error"; fi'
 # exit i3 (logs you out of your X session)
 bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -B 'Yes, exit i3' 'i3-msg exit'"
 
@@ -322,16 +345,23 @@ for_window [class=".*"] border pixel 2
 
 
 # Screenshots
-# bindsym Print exec --no-startup-id flameshot gui
-set $ss "/home/$USER/Pictures/maim/$(date).png"
-bindsym Print exec --no-startup-id maim $ss
-bindsym $mod+Print exec --no-startup-id maim --window $(xdotool getactivewindow) $ss
-bindsym Shift+Print exec --no-startup-id maim --select $ss
+#
+# Three things to capture - the screen, the focused window, a dragged region -
+# each either saved to ~/Pictures/maim or put straight on the clipboard. Ctrl
+# is the "to the clipboard instead" modifier.
+#
+# All six go through script/screenshot.sh, which names the file so it sorts,
+# tells a cancelled selection apart from a failed capture, and shows the shot
+# it just took as the notification's icon. Middle-clicking that popup opens
+# the file (mouse_middle_click = do_action, in dunstrc).
+bindsym Print             exec --no-startup-id $HOME/.config/i3/script/screenshot.sh full
+bindsym $mod+Print        exec --no-startup-id $HOME/.config/i3/script/screenshot.sh window
+bindsym Shift+Print       exec --no-startup-id $HOME/.config/i3/script/screenshot.sh region
 
 ## Clipboard Screenshots
-bindsym Ctrl+Print exec --no-startup-id maim | xclip -selection clipboard -t image/png
-bindsym Ctrl+$mod+Print exec --no-startup-id maim --window $(xdotool getactivewindow) | xclip -selection clipboard -t image/png
-bindsym Ctrl+Shift+Print exec --no-startup-id maim --select | xclip -selection clipboard -t image/png
+bindsym Ctrl+Print        exec --no-startup-id $HOME/.config/i3/script/screenshot.sh full --clip
+bindsym Ctrl+$mod+Print   exec --no-startup-id $HOME/.config/i3/script/screenshot.sh window --clip
+bindsym Ctrl+Shift+Print  exec --no-startup-id $HOME/.config/i3/script/screenshot.sh region --clip
 
 # GTK theming is settings.ini (dark Adwaita) plus the generated gtk.css, which
 # repaints Adwaita's accent to match the wallpaper. Nothing to exec here - the

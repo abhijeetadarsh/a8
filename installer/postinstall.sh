@@ -100,7 +100,13 @@ PKGS_I3=(
     polybar               # the bar
     rofi                  # launcher + powermenu
     feh                   # wallpaper setter
-    dunst libnotify       # notify-send from polybar's updates.sh
+    # The desktop's only way of telling you anything. Half the keybindings act
+    # without opening a window - a screenshot, a new wallpaper, a volume step -
+    # and they all report through .config/i3/script/notify.sh, which is
+    # notify-send (libnotify) talking to dunst. polybar's updates.sh uses it
+    # too. Without these, a failed keybinding is indistinguishable from an
+    # unbound key.
+    dunst libnotify
     xdg-user-dirs
 )
 
@@ -958,6 +964,68 @@ do_dotfiles() {
     fi
 }
 
+# The desktop's feedback channel: notify-send -> dunst -> a popup.
+#
+# There is nothing to install here that the package step has not installed
+# already, and nothing to enable - dunst is D-Bus activated, so the first
+# notification starts it. What this step does is check that the chain is
+# actually complete, because every way it can break is silent. A missing
+# libnotify, a script that lost its execute bit, a dunst that is not there: in
+# all three cases the keybinding still runs, still does its job, and still says
+# nothing, which is indistinguishable from a key that is not bound at all.
+do_notifications() {
+    step "notifications"
+
+    # Where screenshot.sh puts its files. Created here rather than left to the
+    # script so the directory exists before the first Print press, and so it is
+    # this script that decides where it lives.
+    mkdir -p "$HOME/Pictures/maim"
+
+    local rc=0
+
+    command -v notify-send >/dev/null || {
+        bad "notify-send is missing - install libnotify, or the keybindings go silent"
+        rc=1
+    }
+    command -v dunst >/dev/null || {
+        bad "dunst is not installed - there is nothing to display a notification"
+        rc=1
+    }
+
+    # The scripts every notifying keybinding goes through. They are stow
+    # symlinks into the repo, so a missing one means the dotfiles step did not
+    # get as far as this directory.
+    local s
+    for s in notify.sh screenshot.sh volume.sh theme_init.sh monitors.sh; do
+        [[ -x "$HOME/.config/i3/script/$s" ]] || {
+            bad "$HOME/.config/i3/script/$s is missing or not executable"
+            rc=1
+        }
+    done
+
+    # Activation, rather than something to start. dunst ships a D-Bus service
+    # file naming it as the owner of org.freedesktop.Notifications, so the
+    # first notify-send starts the daemon on demand - which is why nothing here
+    # enables a unit and why notifications work before theme_init.sh has run.
+    if [[ ! -f /usr/share/dbus-1/services/org.knopwob.dunst.service ]]; then
+        warn "dunst has no D-Bus activation file - notifications only work once it is running"
+        note "i3's theme_init.sh starts it at login, so this is not fatal"
+    fi
+
+    (( rc != 0 )) && return 1
+
+    # Re-running this from a terminal inside the desktop is the common case, and
+    # there the check can be an actual end-to-end test rather than an inventory.
+    if [[ -n "${DISPLAY:-}" ]] && "$HOME/.config/i3/script/notify.sh" \
+            -u low -T 4000 -i dialog-information -t postinstall \
+            "postinstall" "notifications are working"; then
+        ok "sent a test notification - it should be on screen now"
+    else
+        ok "screenshots, wallpaper, volume and monitor keys will report on screen"
+    fi
+    return 0
+}
+
 do_neovim() {
     step "neovim plugins"
 
@@ -1140,7 +1208,7 @@ do_theme() {
     step "desktop palette"
 
     local wdir="$HOME/.wallpaper/my_collection"
-    mkdir -p "$wdir" "$HOME/.wallpaper/bing" "$HOME/Pictures/maim"
+    mkdir -p "$wdir" "$HOME/.wallpaper/bing"
 
     local count
     count=$(find -L "$wdir" -type f \( -iname '*.jpg' -o -iname '*.jpeg' \
@@ -1309,6 +1377,7 @@ do_packages  || FAILURES=$((FAILURES + 1))
 do_services  || FAILURES=$((FAILURES + 1))
 do_power     || FAILURES=$((FAILURES + 1))
 do_dotfiles  || FAILURES=$((FAILURES + 1))
+do_notifications || FAILURES=$((FAILURES + 1))
 do_xinitrc   || FAILURES=$((FAILURES + 1))
 do_lightdm   || FAILURES=$((FAILURES + 1))
 do_theme     || FAILURES=$((FAILURES + 1))
@@ -1339,6 +1408,8 @@ blank
 say "  ${D}notes${N}"
 say "    ${D}\$mod+Shift+w${N}  new wallpaper, and the whole desktop re-themes from it"
 say "    ${D}\$mod+n${N}        ranger"
+say "    ${D}Print${N}         screenshot to ~/Pictures/maim; add Ctrl for the clipboard,"
+say "    ${D}${N}              Shift to drag a region, \$mod for the focused window"
 say "    ${D}--repair${N}      re-run with this to pick packages to reinstall"
 say "    ${D}neovim${N}        treesitter highlighting only - no LSP, plugins pinned by lazy-lock.json"
 say "    ${D}usb drives${N}    mount themselves at /run/media/$USER - eject from the tray icon"

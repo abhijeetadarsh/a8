@@ -54,7 +54,23 @@
     enable_recursive_icon_lookup = true
     icon_theme = Papirus-Dark
     icon_position = left
-    min_icon_size = 32
+
+    # 24, and it has to be, which is not obvious.
+    #
+    # With recursive lookup dunst asks the icon theme for exactly one size -
+    # this one - and every directory in Papirus is `Type=Fixed`, meaning it
+    # answers only for its own size. So this is not a floor with scaling above
+    # it: it is the single shelf dunst is allowed to look on.
+    #
+    # Papirus ships its actions and status icons at 16, 22 and 24 only; 32
+    # exists for apps and devices and almost nothing else. At 32 every
+    # `audio-volume-*` lookup therefore returned nothing and the notification
+    # came up with no icon at all, silently. 24 is the largest size the whole
+    # set is drawn at, so it is the one where every name resolves.
+    #
+    # This does not touch images passed as a path - a screenshot thumbnail or
+    # a wallpaper - which are only capped by max_icon_size below.
+    min_icon_size = 24
     max_icon_size = 64
 
     sticky_history = yes

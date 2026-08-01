@@ -42,9 +42,21 @@ TAGS=()
 # --- output -----------------------------------------------------------------
 
 if [[ -t 2 ]]; then D=$'\e[2m'; R=$'\e[31m'; N=$'\e[0m'; else D=''; R=''; N=''; fi
+NOTIFY="$HOME/.config/i3/script/notify.sh"
 say()   { printf '%s\n' "$*" >&2; }
 dbg()   { [[ -n "${DEBUG:-}" ]] && printf '%s  %s%s\n' "$D" "$*" "$N" >&2; return 0; }
-die()   { printf '%sfetch_wallpaper: %s%s\n' "$R" "$*" "$N" >&2; exit 1; }
+
+# theme_init.sh execs into this script for --bing and --waifu, so on the
+# keybinding path this stderr goes to nobody. It also runs after theme_init has
+# already put "fetching..." on screen: the same tag replaces that with the
+# reason it will not be arriving, instead of leaving it to time out looking
+# like it worked.
+die()   {
+    printf '%sfetch_wallpaper: %s%s\n' "$R" "$*" "$N" >&2
+    [[ -x "$NOTIFY" ]] && "$NOTIFY" -u critical -i dialog-error -t wallpaper \
+        "Wallpaper" "$*"
+    exit 1
+}
 
 # --- args -------------------------------------------------------------------
 

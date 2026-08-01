@@ -42,19 +42,26 @@ Re-running it is the supported way to fix a half-finished install.
 6. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
-7. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
+7. **Notifications** - creates `~/Pictures/maim` and checks the chain the
+   keybindings report through: `notify-send`, dunst, and the scripts under
+   `.config/i3/script/`. Nothing to install or enable - dunst is D-Bus
+   activated - but every way this breaks is silent, so it is checked rather
+   than assumed. Re-run it from inside the desktop and it sends a real test
+   notification. See [Notifications](#notifications).
+8. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
    ways into it. See below; a file either of them wrote is rewritten on a
    re-run, one you wrote yourself is left alone.
-8. **Login screen** - LightDM plus the GTK greeter, configured and enabled, the
+9. **Login screen** - LightDM plus the GTK greeter, configured and enabled, the
    directory the greeter reads its theme from, and a `display-setup-script` so
    the greeter arranges the monitors before it draws (see
    [The greeter's monitor layout](#the-greeters-monitor-layout)).
-9. **Palette** - generates the desktop colour scheme from a wallpaper, so the
-   first login lands on a themed desktop rather than an i3 config error.
-   i3's other generated include, `monitors.conf`, gets an empty placeholder for
-   the same reason: the script cannot work out the real monitor layout without
-   a running X server, and `monitors.sh` rewrites it at every i3 start anyway.
-10. **neovim plugins** - installs and pins them from
+10. **Palette** - generates the desktop colour scheme from a wallpaper, so the
+    first login lands on a themed desktop rather than an i3 config error.
+    i3's other generated include, `monitors.conf`, gets an empty placeholder
+    for the same reason: the script cannot work out the real monitor layout
+    without a running X server, and `monitors.sh` rewrites it at every i3 start
+    anyway.
+11. **neovim plugins** - installs and pins them from
     [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
     deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
     built by this script rather than by whenever you first happen to open nvim.
@@ -158,6 +165,101 @@ sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=block --
 
 Then it mounts at `/run/media/$USER/TESTSTICK` with `uid=1000`. Remove the
 rule and `sudo losetup -d /dev/loop0` afterwards.
+
+## Notifications
+
+Most i3 keybindings act without opening a window. A screenshot is written, a
+wallpaper is replaced, the volume moves. i3 discards the output of everything
+it `exec`s, so a keybinding has no way to say anything - and, more to the
+point, no way to say that it *failed*. A `$mod+Shift+w` that cannot reach
+waifu.im and a `$mod+Shift+w` that is not bound at all look exactly the same
+from the keyboard.
+
+So everything that acts without a visible result reports through one place:
+[`.config/i3/script/notify.sh`](../dotfiles/.config/i3/script/notify.sh).
+
+| key | what it says |
+| --- | --- |
+| `Print`, `Shift+Print`, `$mod+Print` | the shot, as a thumbnail, with its filename and size. Middle-click the popup to open it |
+| the same three with `Ctrl` | that the image is on the clipboard |
+| `$mod+Shift+w` | the wallpaper you got, with the image as the icon - or why you did not get one |
+| `XF86Audio{Raise,Lower}Volume`, `Mute`, `MicMute` | the level, as a progress bar |
+| `$mod+Shift+m` | the monitor layout that is now on screen |
+| `$mod+Shift+c`, `$mod+Shift+r` | whether i3 accepted the config |
+| plugging a drive in | udiskie's own popup - see [Removable drives](#removable-drives) |
+
+And, deliberately, nothing at all for: locking (the screen goes black, you can
+tell), exiting i3 (there is a nagbar asking first), and the `theme_init.sh` and
+`monitors.sh` runs at every login. A notification you get every time you log in
+is not information, it is a thing you learn to dismiss - which is how the ones
+that matter get dismissed too. `monitors.sh` only notifies when it is given
+`--notify`, which is what `$mod+Shift+m` passes and what i3's `exec_always`
+does not.
+
+### One tag per subject
+
+Holding a volume key down is ten keypresses. Without help that is ten popups
+stacking down the screen, nine of them stating a level that is already wrong.
+
+`notify.sh -t volume` sets dunst's `x-dunst-stack-tag` hint, which makes each
+new notification *replace* the last one carrying the same tag. Ten presses
+become one popup counting up. The same tag is what lets `theme_init.sh` put
+"fetching..." on screen and have the wallpaper - or the error - land in its
+place rather than under it.
+
+### Icons resolve at exactly one size
+
+`dunstrc` sets `min_icon_size = 24`, and it has to.
+
+With `enable_recursive_icon_lookup`, dunst asks the icon theme for exactly one
+size - that one - and every directory in Papirus is `Type=Fixed`, so it answers
+only for its own size. This is not a floor with scaling above it; it is the one
+shelf dunst is allowed to look on. Papirus draws its actions and status icons
+at 16, 22 and 24 only, so at the previous value of 32 every `audio-volume-*`
+lookup found nothing and the notification came up with no icon, silently. 24 is
+the largest size the whole set exists at.
+
+Images passed as a path - a screenshot thumbnail, a wallpaper - are not
+affected by this; they are only capped by `max_icon_size`.
+
+### Screenshots
+
+[`screenshot.sh`](../dotfiles/.config/i3/script/screenshot.sh) is one script
+behind all six Print bindings: three things to capture (screen, focused window,
+dragged region) with and without `Ctrl` for "to the clipboard instead".
+
+Things it does that the `maim` one-liners in the config could not:
+
+- **Names files so they sort.** `$(date)` with no format is
+  `Fri Aug  1 06:22:05 PM IST 2026` - spaces, colons, and April before August
+  in a directory listing. Now: `2026-08-01_18-22-05.png`.
+- **Tells cancelling apart from failing.** `maim --select` exits non-zero when
+  you press Escape, exactly as it does when it genuinely breaks. Cancelling is
+  silent; a real failure gets a critical notification saying what maim said.
+- **Shows you what it captured**, as the notification's icon - which is the
+  only thing that tells you the region you dragged was the region you meant.
+- **Writes through a temporary file**, so a cancelled capture cannot leave a
+  0-byte `.png` in the library looking like a screenshot that came out black.
+
+The selection rectangle is drawn in the wallpaper's accent colour, from the
+same generated palette as everything else.
+
+### Volume
+
+[`volume.sh`](../dotfiles/.config/i3/script/volume.sh) replaced
+`pactl set-sink-volume @DEFAULT_SINK@ +10%` in the keybindings, for two
+reasons. `+10%` has no ceiling: six presses put a PipeWire sink at 160%, which
+is gain applied after the mixer - it clips, and nothing on screen says that is
+what you are hearing. And the notification's progress bar has to show the value
+that was actually set, which means computing it here rather than reading it
+back afterwards.
+
+`up` and `down` deliberately leave mute alone. A volume key that silently
+unmutes is how a meeting ends up playing to a room.
+
+The `&& $refresh_i3status` those bindings used to carry was signalling a
+program that is not running - the bar is polybar, and the `bar {}` block that
+would have started i3status is commented out.
 
 ## The greeter's monitor layout
 
@@ -486,6 +588,10 @@ To unlink everything, swap `--restow` for `--delete`.
   `journalctl -b` for the driver.
 - **Fonts** - boxes instead of icons means a font package did not install;
   check `fc-list | grep -i caskaydia`.
+- **Notifications** - press `Print`. A popup with a thumbnail of the screen
+  means the whole chain works. Nothing at all: run
+  `~/.config/i3/script/notify.sh test` from a terminal, which passes the
+  daemon's error through instead of swallowing it.
 
 ## Network, from the bar
 
