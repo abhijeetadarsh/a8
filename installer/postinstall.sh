@@ -993,6 +993,66 @@ check_i3_config() {
     return "$rc"
 }
 
+# The bar's two silent failures.
+#
+# polybar has no dry run. `polybar --dump=<key>` looks like one and is not: it
+# reads the config file and prints a value without ever building the bar, so it
+# exits 0 on a `modules-right` naming a module that does not exist. Confirmed
+# against a deliberately broken copy - the check that looked free is worthless.
+#
+# And both of the ways this goes wrong produce no output at all, because
+# launch.sh starts polybar with -q:
+#
+#   - a module named in modules-* with no [module/NAME] section anywhere. The
+#     bar drops it, or refuses to come up, without saying which name it did
+#     not recognise.
+#   - a click handler or exec pointing at a script that is not there. The
+#     module draws, the button does nothing, and there is no log line.
+#
+# Neither is hypothetical: every module on the right of this bar is a script,
+# and the paths are written by hand in an ini file that nothing else validates.
+check_polybar_config() {
+    local cfg="$HOME/.config/polybar/shades/config.ini" rc=0
+
+    [[ -f "$cfg" ]] || { bad "no polybar config at $cfg"; return 1; }
+
+    # Everything polybar will read: the entry point plus what it includes.
+    # The module definitions live in the included files, so a check that looks
+    # only at config.ini would call every module undefined.
+    local -a files=("$cfg")
+    local inc
+    while read -r inc; do
+        inc="${inc/#\~/$HOME}"
+        [[ -f "$inc" ]] && files+=("$inc")
+    done < <(sed -n 's/^[[:space:]]*include-file[[:space:]]*=[[:space:]]*//p' "$cfg")
+
+    local defined referenced undefined
+    defined="$(grep -h -o '^\[module/[^]]*\]' "${files[@]}" |
+        sed 's|^\[module/||; s|\]$||' | sort -u)"
+    referenced="$(grep -h -E '^modules-(left|center|right)[[:space:]]*=' "${files[@]}" |
+        sed 's/^[^=]*=//' | tr ' ' '\n' | sed '/^$/d' | sort -u)"
+    undefined="$(comm -23 <(printf '%s\n' "$referenced") <(printf '%s\n' "$defined"))"
+
+    if [[ -n "$undefined" ]]; then
+        bad "the bar names module(s) nothing defines: $(printf '%s' "$undefined" | tr '\n' ' ')"
+        note "polybar runs with -q, so this would show up as a missing icon and nothing else"
+        rc=1
+    fi
+
+    # Only *.sh, and only paths written as ~/... or $HOME/... - the other
+    # paths in these files are generated (color/out.ini) or belong to polybar.
+    local path
+    while read -r path; do
+        [[ -n "$path" ]] || continue
+        path="${path/#\~/$HOME}"
+        path="${path/#\$HOME/$HOME}"
+        [[ -x "$path" ]] || { bad "the bar calls a script that is not there: $path"; rc=1; }
+    done < <(grep -h -o -E '(~|\$HOME)/[^ "]*\.sh' "${files[@]}" | sort -u)
+
+    (( rc == 0 )) && ok "polybar's modules all exist, and so do the scripts they call"
+    return "$rc"
+}
+
 do_dotfiles() {
     step "dotfiles"
 
@@ -1067,9 +1127,13 @@ do_dotfiles() {
             note "installed ranger's scope.sh preview script"
     fi
 
-    # Now that the links point at the repo, check the config they point at.
-    check_i3_config || return 1
-    return 0
+    # Now that the links point at the repo, check the configs they point at.
+    # Both, not either: a bar that silently drops a module and an i3 binding
+    # that fails at press time are the same class of fault.
+    local rc=0
+    check_i3_config     || rc=1
+    check_polybar_config || rc=1
+    return "$rc"
 }
 
 # The desktop's feedback channel: notify-send -> dunst -> a popup.

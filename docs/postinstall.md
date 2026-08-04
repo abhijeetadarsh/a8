@@ -42,9 +42,16 @@ Re-running it is the supported way to fix a half-finished install.
 6. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
-   Then it checks the i3 config it just linked - `i3 -C` for the directives,
-   and a scan of the bindings for the one mistake `i3 -C` cannot see (see
+   Then it checks the two configs it just linked whose mistakes are silent.
+   For i3: `i3 -C` for the directives, plus a scan of the bindings for the one
+   mistake `i3 -C` cannot see (see
    [A binding that needs shell logic needs a script](#a-binding-that-needs-shell-logic-needs-a-script)).
+   For polybar: every module named in a `modules-*` line has a `[module/…]`
+   section somewhere, and every `*.sh` the bar calls exists and is executable.
+   polybar has no dry run - `polybar --dump=<key>` looks like one but never
+   builds the bar, so it exits 0 on a config naming a module that does not
+   exist - and `launch.sh` starts it with `-q`, so both faults otherwise show
+   up as an icon that is missing or a button that does nothing.
 7. **Notifications** - creates `~/Pictures/maim` and checks the chain the
    keybindings report through: `notify-send`, dunst, and the scripts under
    `.config/i3/script/`. Nothing to install or enable - dunst is D-Bus
@@ -230,6 +237,15 @@ udevadm info --query=property --name=/dev/video0 | grep ID_V4L_CAPABILITIES
 
 `camera.sh list` prints what that resolves to, and what has each camera open -
 the answer to the only question a webcam raises in normal use.
+
+### guvcview is two windows, spelled two ways
+
+It opens a preview and a control panel, and gives them different `WM_CLASS`
+capitalisation - `guvcview` for the preview, `Guvcview` for the controls. So
+both the i3 float rule and `app.sh`'s "is it already open" lookup match the
+class case-insensitively. Either spelling on its own catches one window and
+misses the other, and i3 does not warn about a `for_window` rule that never
+fires - the half that was missed would simply tile itself into your layout.
 
 ### Access is an ACL, not the `video` group
 

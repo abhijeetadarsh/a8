@@ -324,11 +324,11 @@ for_window [class="pavucontrol"] floating enable
 # thing in and close, and tiling it re-lays out every window on the workspace
 # to make room for something that will be gone in ten seconds.
 #
-# (?i) because this is the one class here that has not been read off a running
-# window: guvcview is installed by postinstall, not by hand, and a GTK app's
-# WM_CLASS capitalisation is not predictable from its name. i3 matches these
-# as unanchored regexes, so a wrong guess at the case does not warn - the rule
-# just never fires. Matching either way costs four characters.
+# (?i) is required here and not a precaution. guvcview opens *two* windows and
+# capitalises them differently - the preview is class `guvcview` and the
+# control panel is class `Guvcview` - so either spelling on its own tiles one
+# of the two. i3 matches these as unanchored regexes and does not warn when a
+# rule never fires, so the half that got missed would just quietly tile.
 for_window [class="(?i)guvcview"] floating enable
 for_window [class="Yad"] floating enable
 for_window [class="mpv"] floating enable

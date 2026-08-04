@@ -49,6 +49,12 @@ APP="$HOME/.config/i3/script/app.sh"
 # white balance, resolution, frame rate - next to a live preview, so a slider
 # can be judged by what it does to the picture instead of by its name.
 CAMERA_APP="${CAMERA_APP:-guvcview}"
+# Matched case-insensitively by app.sh, which matters more than it looks:
+# guvcview puts up two windows and capitalises them differently - `guvcview`
+# for the preview, `Guvcview` for the controls. Either spelling alone finds
+# only one of them, so a second click on the bar button would raise nothing
+# half the time and start a third window. The i3 config floats both with the
+# same (?i) trick.
 CAMERA_APP_CLASS="${CAMERA_APP_CLASS:-guvcview}"
 
 # --- what is a camera -------------------------------------------------------
