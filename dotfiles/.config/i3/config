@@ -311,22 +311,25 @@ for_window [class="feh"] fullscreen
 
 # reload the configuration file
 #
-# Through i3-msg rather than the bare `reload` command, because a reload that
-# worked and a reload that did not look identical from the keyboard: the
-# desktop does not change either way. i3-msg exits non-zero when i3 refuses the
-# config, so the two can be told apart and said out loud.
+# Through script/reload.sh rather than the bare `reload` command, because a
+# reload that worked and a reload that did not look identical from the
+# keyboard: the desktop does not change either way. The script checks the
+# config first, so a refusal can name the line that caused it.
 #
-# `reload; exec notify...` would not do: i3 runs the whole chain regardless of
-# whether the reload succeeded, so it would report success over the top of the
-# nagbar explaining the failure.
+# The shell logic that used to sit on this line - `sh -c 'if i3-msg -q reload;
+# then notify...; fi'` - was never running. i3's own command parser reads `;`
+# as a separator between i3 commands unless the whole argument is
+# double-quoted, so it cut the line in two: it ran the reload and then failed
+# to parse `then notify...`, answering the keypress with a parse error while
+# the reload it had already done went unreported. See the header of reload.sh.
 #:: i3 itself
 #: reload the config
-bindsym $mod+Shift+c exec --no-startup-id sh -c 'if i3-msg -q reload; then $HOME/.config/i3/script/notify.sh -u low -T 2000 -t i3 -i view-refresh "i3" "config reloaded"; else $HOME/.config/i3/script/notify.sh -u critical -t i3 -i dialog-error "i3" "config refused - see the error at the top of the screen"; fi'
+bindsym $mod+Shift+c exec --no-startup-id $HOME/.config/i3/script/reload.sh reload
 
 # restart i3 inplace (preserves your layout/session, can be used to upgrade i3)
 # The notification outlives the restart: i3 re-execs itself, dunst does not.
 #: restart i3, keeping the layout
-bindsym $mod+Shift+r exec --no-startup-id sh -c 'if i3-msg -q restart; then $HOME/.config/i3/script/notify.sh -u low -T 2000 -t i3 -i view-refresh "i3" "restarted"; else $HOME/.config/i3/script/notify.sh -u critical -t i3 -i dialog-error "i3" "restart refused - the config has an error"; fi'
+bindsym $mod+Shift+r exec --no-startup-id $HOME/.config/i3/script/reload.sh restart
 # exit i3 (logs you out of your X session)
 #: log out of i3 - it asks first
 bindsym $mod+Shift+e exec "i3-nagbar -t warning -m 'You pressed the exit shortcut. Do you really want to exit i3? This will end your X session.' -B 'Yes, exit i3' 'i3-msg exit'"

@@ -889,6 +889,85 @@ EOF
     return 0
 }
 
+# The i3 config is the one dotfile whose mistakes wait for a keypress.
+#
+# `i3 -C` reads the file the way i3 does and reports bad directives, which is
+# most of what can be wrong - but only most. The *commands* attached to bindsym
+# are parsed lazily, when the key is pressed, so a binding i3 will reject reads
+# as a clean config here and fails months later in front of whoever presses it.
+#
+# The trap that produced this check: i3's command parser treats `;` and `,` as
+# separators between i3 commands unless the whole argument is double-quoted -
+# single quotes mean nothing to it. So `exec sh -c 'a; b'` is not one exec, it
+# is `exec sh -c 'a'` plus the unparseable fragment `b`. The first half runs,
+# which is what makes it so hard to spot: the key half works.
+#
+# Both halves of the check are free and neither needs a running i3.
+check_i3_config() {
+    local cfg="$HOME/.config/i3/config" rc=0 out bad_lines
+
+    [[ -f "$cfg" ]] || { bad "no i3 config at $cfg"; return 1; }
+
+    if command -v i3 >/dev/null; then
+        if ! out="$(i3 -C -c "$cfg" 2>&1)"; then
+            bad "i3 rejects the config:"
+            # The offending line and the caret under it are the useful part.
+            # The "Expected one of these tokens" list is fifty directive names
+            # on one line and buries everything else in a terminal.
+            printf '%s\n' "$out" |
+                sed -n 's/.*ERROR: CONFIG: //p' |
+                grep -v '^Expected one of these tokens' |
+                cut -c1-100 | head -6 | sed 's/^/      /'
+            note "full message: i3 -C -c $cfg"
+            rc=1
+        fi
+    fi
+
+    # What counts as wrong here is narrower than "an exec containing a `;`":
+    #
+    #   - Only bindsym/bindcode. The top-level `exec` and `exec_always`
+    #     directives go straight to a shell at startup and never meet the
+    #     command parser, so a `;` is literal there.
+    #   - Not if the whole argument is double-quoted. That is the form that
+    #     works, and the point of the check is to find the ones that do not.
+    #   - Not a bare `exec a, exec b` either: outside quotes, i3 chaining two
+    #     of its own commands is exactly what the author meant.
+    #
+    # What is left is a `;` or `,` inside quoting i3 does not honour - written
+    # by someone who expected the shell to read that line first.
+    bad_lines="$(awk '
+        /^[[:space:]]*(bindsym|bindcode)[[:space:]]/ {
+            where = index($0, " exec ")
+            if (where == 0) next
+            arg = substr($0, where + 6)
+            sub(/^--no-startup-id[[:space:]]+/, "", arg)
+            if (arg ~ /^"/) next
+
+            quote = ""
+            for (i = 1; i <= length(arg); i++) {
+                c = substr(arg, i, 1)
+                if (quote == "") {
+                    if (c == "\"" || c == "'"'"'") quote = c
+                } else if (c == quote) {
+                    quote = ""
+                } else if (c == ";" || c == ",") {
+                    printf "      line %d: %s\n", NR, substr($0, 1, 72)
+                    break
+                }
+            }
+        }' "$cfg")"
+
+    if [[ -n "$bad_lines" ]]; then
+        bad "binding(s) i3 will refuse at press time - unquoted ; or , in an exec:"
+        printf '%s\n' "$bad_lines"
+        note "double-quote the whole argument, or move the shell logic into script/"
+        rc=1
+    fi
+
+    (( rc == 0 )) && ok "i3 config parses, and no binding hides a shell command from it"
+    return "$rc"
+}
+
 do_dotfiles() {
     step "dotfiles"
 
@@ -962,6 +1041,10 @@ do_dotfiles() {
         ranger --copy-config=scope >/dev/null 2>&1 &&
             note "installed ranger's scope.sh preview script"
     fi
+
+    # Now that the links point at the repo, check the config they point at.
+    check_i3_config || return 1
+    return 0
 }
 
 # The desktop's feedback channel: notify-send -> dunst -> a popup.
@@ -996,7 +1079,7 @@ do_notifications() {
     # They are stow symlinks into the repo, so a missing one means the dotfiles
     # step did not get as far as this directory.
     local s
-    for s in notify.sh screenshot.sh volume.sh theme_init.sh monitors.sh shortcuts.sh; do
+    for s in notify.sh screenshot.sh volume.sh theme_init.sh monitors.sh shortcuts.sh reload.sh; do
         [[ -x "$HOME/.config/i3/script/$s" ]] || {
             bad "$HOME/.config/i3/script/$s is missing or not executable"
             rc=1

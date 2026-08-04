@@ -42,6 +42,9 @@ Re-running it is the supported way to fix a half-finished install.
 6. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
+   Then it checks the i3 config it just linked - `i3 -C` for the directives,
+   and a scan of the bindings for the one mistake `i3 -C` cannot see (see
+   [A binding that needs shell logic needs a script](#a-binding-that-needs-shell-logic-needs-a-script)).
 7. **Notifications** - creates `~/Pictures/maim` and checks the chain the
    keybindings report through: `notify-send`, dunst, and the scripts under
    `.config/i3/script/`. Nothing to install or enable - dunst is D-Bus
@@ -213,6 +216,40 @@ nobody reads:
   `Enter / Escape / Super+r   back to normal`. i3 binds hjkl *and* the arrows
   in resize mode, which is eight rows for four things.
 
+### A binding that needs shell logic needs a script
+
+i3 does not hand an `exec` line to the shell untouched. Its own command parser
+reads the line first, and in that parser `;` and `,` **separate i3 commands**.
+They are literal only inside a *double-quoted* argument - single quotes mean
+nothing to it. So the obvious way to write a binding that reports what it did:
+
+```
+bindsym $mod+Shift+c exec sh -c 'if i3-msg -q reload; then notify...; fi'
+```
+
+is read as two commands: `exec sh -c 'if i3-msg -q reload'`, which i3 runs, and
+`then notify...; fi`, which it cannot parse. Pressing the key reloads the config
+*and* answers with
+
+```
+ERROR: Expected one of these tokens: <end>, '[', 'move', 'exec', ...
+```
+
+The half that does the work runs, so the binding looks half-alive rather than
+broken, and `i3 -C` says the config is clean - it checks directives, but the
+commands attached to `bindsym` are parsed lazily, when the key is pressed.
+
+Double-quoting the whole argument parses, at the cost of three levels of nested
+quoting around every string. The bindings that need a shell call a script in
+`.config/i3/script/` instead, and the config line stays a path and a word -
+`$mod+Shift+c` and `$mod+Shift+r` are
+[`reload.sh`](../dotfiles/.config/i3/script/reload.sh), which checks the config
+with `i3 -C` first so a refusal can name the line that caused it.
+
+The dotfiles step of `postinstall.sh` checks both halves of this: `i3 -C` for
+the config, and a scan of every `bindsym`/`bindcode` for an unquoted `;` or `,`
+in an `exec` - the one class of mistake `i3 -C` cannot see.
+
 ## Notifications
 
 Most i3 keybindings act without opening a window. A screenshot is written, a
@@ -232,7 +269,7 @@ So everything that acts without a visible result reports through one place:
 | `$mod+Shift+w` | the wallpaper you got, with the image as the icon - or why you did not get one |
 | `XF86Audio{Raise,Lower}Volume`, `Mute`, `MicMute` | the level, as a progress bar |
 | `$mod+Shift+m` | the monitor layout that is now on screen |
-| `$mod+Shift+c`, `$mod+Shift+r` | whether i3 accepted the config |
+| `$mod+Shift+c`, `$mod+Shift+r` | whether i3 accepted the config, and the line it refused if it did not |
 | plugging a drive in | udiskie's own popup - see [Removable drives](#removable-drives) |
 
 And, deliberately, nothing at all for: locking (the screen goes black, you can
