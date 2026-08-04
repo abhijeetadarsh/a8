@@ -111,6 +111,14 @@ exec --no-startup-id nm-applet
 # that looks right. Wrapping the logic in its own shell is what survives it.
 exec_always --no-startup-id sh -c 'pgrep -x udiskie >/dev/null || udiskie'
 
+# The show-the-desktop square in the bar switches every monitor to an empty
+# workspace, and this is what keeps those workspaces empty: i3 has no way to
+# say "this workspace takes no windows", so a subscriber moves away anything
+# that opens on one. No pgrep guard needed - the script takes a lock and a
+# second copy exits by itself, which is also what makes it safe to re-run here
+# on every $mod+Shift+r.
+exec_always --no-startup-id $HOME/.config/i3/script/desktop.sh guard
+
 # Volume, through script/volume.sh rather than pactl directly.
 #
 # The script exists for two things pactl on its own does not do: it clamps at
@@ -273,8 +281,14 @@ set $ws8 "8"
 set $ws9 "9"
 set $ws10 "10"
 
-# switch to workspace
+# Show the desktop, every monitor at once - the square at the left of the bar
+# does the same thing, and clicking it on one screen still moves all of them.
+# Not $mod+d, which is the rofi launcher (bindcode 40, further up).
 #:: Monitors and workspaces
+#: show the desktop / put it back
+bindsym $mod+Shift+d exec --no-startup-id $HOME/.config/i3/script/desktop.sh toggle
+
+# switch to workspace
 bindsym $mod+1 workspace number $ws1
 bindsym $mod+2 workspace number $ws2
 bindsym $mod+3 workspace number $ws3
