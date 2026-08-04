@@ -79,7 +79,31 @@ PKGS_X=(
 
 # --- audio ------------------------------------------------------------------
 # The i3 volume keys call pactl, which needs a running pipewire-pulse.
+#
+# pavucontrol is also the settings window behind two of the bar's buttons -
+# right-clicking the volume opens it on the output devices, right-clicking the
+# microphone on the input devices. See volume.sh.
 PKGS_AUDIO=( pipewire pipewire-pulse pipewire-alsa wireplumber pavucontrol )
+
+# --- the webcam -------------------------------------------------------------
+#
+# There is no driver here, and that is the whole point of the group: every
+# built-in webcam and almost every USB one is a UVC device, which the kernel
+# handles with uvcvideo - in-tree, autoloaded when the device appears, nothing
+# to install or enable. What is missing on a bare Arch install is the
+# userspace to *look* at it, and its absence is what makes a working camera
+# look broken: the node is there, nothing can open it, and there is no error
+# anywhere to explain that.
+#
+# guvcview   - the camera settings window the bar's camera button opens. Not
+#              a viewer: it puts every UVC control the device exposes -
+#              exposure, gain, white balance, resolution, frame rate - beside
+#              a live preview, so a slider can be judged by what it does to
+#              the picture. Its only deps are glib2 and gtk3, both already in.
+# v4l-utils  - v4l2-ctl, which is how you ask a device what it actually is.
+#              camera.sh prefers udev's answer and falls back to this one; the
+#              `camera` step below uses it to name what it found.
+PKGS_CAMERA=( guvcview v4l-utils )
 
 # --- networking -------------------------------------------------------------
 # networkmanager itself is installed and enabled by archsetup.py; this is the
@@ -238,6 +262,7 @@ PKG_GROUPS=(
     "X server|${PKGS_X[*]}"
     "login|${PKGS_LOGIN[*]}"
     "audio|${PKGS_AUDIO[*]}"
+    "camera|${PKGS_CAMERA[*]}"
     "network|${PKGS_NET[*]}"
     "i3 desktop|${PKGS_I3[*]}"
     "screenshots|${PKGS_SHOT[*]}"
@@ -1079,7 +1104,8 @@ do_notifications() {
     # They are stow symlinks into the repo, so a missing one means the dotfiles
     # step did not get as far as this directory.
     local s
-    for s in notify.sh screenshot.sh volume.sh theme_init.sh monitors.sh shortcuts.sh reload.sh; do
+    for s in notify.sh screenshot.sh volume.sh theme_init.sh monitors.sh shortcuts.sh \
+             reload.sh camera.sh app.sh; do
         [[ -x "$HOME/.config/i3/script/$s" ]] || {
             bad "$HOME/.config/i3/script/$s is missing or not executable"
             rc=1
@@ -1107,6 +1133,92 @@ do_notifications() {
         ok "screenshots, wallpaper, volume and monitor keys will report on screen"
     fi
     return 0
+}
+
+# The webcam, which has nothing to install and three ways to be unusable.
+#
+# uvcvideo is in the kernel and autoloads, so there is no driver step here and
+# no module to add to mkinitcpio. What this checks is everything around it:
+#
+#   1. that the kernel found a capture device at all,
+#   2. that you can open it,
+#   3. that the userspace to configure it is installed.
+#
+# All three fail the same silent way. A camera with no readable node, a camera
+# with no app and a machine with no camera are one symptom - nothing happens -
+# and the bar button is deliberately absent in the third case, so without this
+# step there is nowhere the difference gets stated.
+#
+# Not fatal when there is no camera: a desktop without one is a correct
+# machine, not a half-finished install.
+do_camera() {
+    step "camera"
+
+    local cam="$HOME/.config/i3/script/camera.sh" rc=0 dev name line
+    local -a found=()
+
+    [[ -x "$cam" ]] || { bad "$cam is missing - the dotfiles step did not finish"; return 1; }
+
+    # camera.sh, rather than a second copy of the same logic here. It is the
+    # one place that knows a UVC device registers a metadata node beside its
+    # capture node - so /dev/video* is not a list of cameras, and counting it
+    # would report two of them on a laptop with one.
+    #
+    # Collected into an array first, and not piped straight into the loop
+    # below. That loop can ask a question, and a `while read < <(...)` has the
+    # device list on its stdin - so confirm's own `read` would answer itself
+    # with the next camera instead of waiting for you.
+    mapfile -t found < <("$cam" devices 2>/dev/null)
+
+    for line in "${found[@]}"; do
+        IFS=$'\t' read -r dev name <<< "$line"
+
+        # The nodes are root:video, and what normally grants you access is not
+        # that group - it is the ACL systemd-logind puts on the device for
+        # whoever owns the active local session (uaccess). That is why a
+        # working camera needs no group membership, and why this tests the
+        # access itself rather than testing for the group: the group is one of
+        # two ways to pass, and the wrong one to check.
+        if [[ -r "$dev" && -w "$dev" ]]; then
+            ok "$name ($dev)"
+        else
+            bad "$name ($dev) is not readable by you"
+            if id -nG "$USER" | grep -qw video; then
+                note "you are in the video group - log out and back in for it to apply"
+            elif confirm "add $USER to the video group?"; then
+                if sudo usermod -aG video "$USER"; then
+                    note "added - log out and back in, the group is read at login"
+                else
+                    bad "usermod failed"
+                fi
+            else
+                note "logind's uaccess ACL normally covers this - check you are on a"
+                note "local seat session (loginctl show-session \$XDG_SESSION_ID -p Remote)"
+            fi
+            rc=1
+        fi
+    done
+
+    if (( ${#found[@]} == 0 )); then
+        if [[ -e /dev/video0 ]]; then
+            # Nodes but no capture node: every one of them is metadata, which
+            # means a device registered without a capture interface. Rare, and
+            # worth saying out loud rather than reporting as "no camera".
+            warn "video devices exist but none of them captures - see: v4l2-ctl --list-devices"
+        else
+            note "no camera on this machine - the bar's camera button hides itself"
+        fi
+        return 0
+    fi
+
+    local p
+    for p in "${PKGS_CAMERA[@]}"; do
+        is_satisfied "$p" || { bad "$p is not installed - re-run with --repair"; rc=1; }
+    done
+
+    (( rc == 0 )) &&
+        ok "the bar's camera button opens ${PKGS_CAMERA[0]} on ${found[0]%%$'\t'*}"
+    return "$rc"
 }
 
 do_neovim() {
@@ -1461,6 +1573,8 @@ do_services  || FAILURES=$((FAILURES + 1))
 do_power     || FAILURES=$((FAILURES + 1))
 do_dotfiles  || FAILURES=$((FAILURES + 1))
 do_notifications || FAILURES=$((FAILURES + 1))
+# After dotfiles: it runs the camera.sh that step links into place.
+do_camera    || FAILURES=$((FAILURES + 1))
 do_xinitrc   || FAILURES=$((FAILURES + 1))
 do_lightdm   || FAILURES=$((FAILURES + 1))
 do_theme     || FAILURES=$((FAILURES + 1))

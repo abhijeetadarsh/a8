@@ -7,8 +7,14 @@
 #   volume.sh mute          toggle the sink
 #   volume.sh micmute       toggle the default source
 #   volume.sh show          report the current state, change nothing
+#   volume.sh settings      open the mixer on the output devices
+#   volume.sh micsettings   open it on the input devices
+#   volume.sh micwatch      the bar's microphone glyph; never exits
+#   volume.sh micstatus     that glyph once, and exit
 #
-# Bound to the XF86Audio* keys in the i3 config.
+# Bound to the XF86Audio* keys in the i3 config. The bar reaches the last four
+# through [module/mic] and the alsa module's right click - see polybar's
+# user_modules.ini.
 #
 # The notification carries dunst's progress bar, and every call tags it the
 # same, so holding the key down redraws one popup instead of stacking ten - see
@@ -30,7 +36,14 @@
 set -uo pipefail
 
 NOTIFY="$HOME/.config/i3/script/notify.sh"
+APP="$HOME/.config/i3/script/app.sh"
 STEP="${VOLUME_STEP:-10}"
+
+# The bar's microphone glyph. Font Awesome codepoints (U+F130 / U+F131), which
+# every Nerd Font version has had - unlike the v2 glyphs that stopped
+# rendering elsewhere in this config when the font was updated.
+MIC_ON="${MIC_ON_GLYPH:-}"
+MIC_OFF="${MIC_OFF_GLYPH:-}"
 
 SINK="@DEFAULT_SINK@"
 SOURCE="@DEFAULT_SOURCE@"
@@ -100,6 +113,51 @@ report_source() {
     fi
 }
 
+# --- the mixer --------------------------------------------------------------
+
+# pavucontrol's tabs, which is the whole reason the two bar buttons are not the
+# same command: 1 playback, 2 recording, 3 output devices, 4 input devices,
+# 5 configuration. Clicking the speaker should land on the speakers and
+# clicking the microphone on the microphones, not both on whatever tab it was
+# left on.
+#
+# The one thing this cannot do is re-select the tab on a window that is already
+# open - app.sh raises that window rather than starting a second mixer, and
+# pavucontrol takes --tab only at startup. Deliberate: a second mixer is worse
+# than the wrong tab. See app.sh.
+mixer() { "$APP" pavucontrol pavucontrol --tab="$1"; }
+
+# --- the bar's microphone ---------------------------------------------------
+
+# Which glyph, not which colour. The alsa module next to this one already says
+# muted by swapping its glyph, and matching that is worth more than a louder
+# indicator that only this module knows how to draw.
+mic_glyph() {
+    if is_muted source "$SOURCE"; then
+        printf '%s\n' "$MIC_OFF"
+    else
+        printf '%s\n' "$MIC_ON"
+    fi
+}
+
+# polybar reads this forever (tail = true in [module/mic]). Driven by pactl's
+# own event stream rather than an interval, because the thing it reports is a
+# keypress - XF86AudioMicMute - and a microphone that goes on showing "on" for
+# a second after you muted it is worse than one that shows nothing at all.
+#
+# `on server` as well as `on source`: switching the default source - plugging
+# a headset in - changes which device this is reporting without changing
+# anything about the old one.
+mic_watch() {
+    mic_glyph
+    pactl subscribe 2>/dev/null |
+        while IFS= read -r event; do
+            case "$event" in
+                *"on source"*|*"on server"*) mic_glyph ;;
+            esac
+        done
+}
+
 case "$ACTION" in
     up|down)
         cur="$(sink_volume)"
@@ -127,6 +185,18 @@ case "$ACTION" in
         ;;
     mic|micshow)
         report_source
+        ;;
+    settings)
+        mixer 3
+        ;;
+    micsettings)
+        mixer 4
+        ;;
+    micwatch)
+        mic_watch
+        ;;
+    micstatus)
+        mic_glyph
         ;;
     --help|-h)
         awk 'NR > 2 && /^#/ { sub(/^# ?/, ""); print; next } NR > 2 { exit }' "$0"

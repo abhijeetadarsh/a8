@@ -51,20 +51,25 @@ Re-running it is the supported way to fix a half-finished install.
    activated - but every way this breaks is silent, so it is checked rather
    than assumed. Re-run it from inside the desktop and it sends a real test
    notification. See [Notifications](#notifications).
-8. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
+8. **Camera** - checks, rather than installs. There is no webcam driver to
+   install: `uvcvideo` is in the kernel and autoloads. What this reports is
+   the three things that do go wrong - no capture device, a device you cannot
+   open, or the userspace to configure it missing - because all three present
+   as the same nothing. See [The webcam](#the-webcam).
+9. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
    ways into it. See below; a file either of them wrote is rewritten on a
    re-run, one you wrote yourself is left alone.
-9. **Login screen** - LightDM plus the GTK greeter, configured and enabled, the
-   directory the greeter reads its theme from, and a `display-setup-script` so
-   the greeter arranges the monitors before it draws (see
-   [The greeter's monitor layout](#the-greeters-monitor-layout)).
-10. **Palette** - generates the desktop colour scheme from a wallpaper, so the
+10. **Login screen** - LightDM plus the GTK greeter, configured and enabled, the
+    directory the greeter reads its theme from, and a `display-setup-script` so
+    the greeter arranges the monitors before it draws (see
+    [The greeter's monitor layout](#the-greeters-monitor-layout)).
+11. **Palette** - generates the desktop colour scheme from a wallpaper, so the
     first login lands on a themed desktop rather than an i3 config error.
     i3's other generated include, `monitors.conf`, gets an empty placeholder
     for the same reason: the script cannot work out the real monitor layout
     without a running X server, and `monitors.sh` rewrites it at every i3 start
     anyway.
-11. **neovim plugins** - installs and pins them from
+12. **neovim plugins** - installs and pins them from
     [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
     deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
     built by this script rather than by whenever you first happen to open nvim.
@@ -169,6 +174,130 @@ sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=block --
 Then it mounts at `/run/media/$USER/TESTSTICK` with `uid=1000`. Remove the
 rule and `sudo losetup -d /dev/loop0` afterwards.
 
+## The webcam
+
+There is no driver step. Every built-in webcam and almost every USB one is a
+UVC device, which the kernel handles with `uvcvideo` - in-tree, autoloaded
+when the device appears, nothing to install and nothing to add to mkinitcpio.
+
+What a bare Arch install is missing is the userspace to *use* it, and that
+absence is what makes a working camera look broken: the device node is there,
+nothing on the system can open it, and no error is produced anywhere. So the
+`camera` package group is two things and no driver:
+
+| package | what it is for |
+| --- | --- |
+| `guvcview` | the settings window the bar's camera button opens - every UVC control the device exposes next to a live preview |
+| `v4l-utils` | `v4l2-ctl`, for asking a device what it actually is |
+
+The `camera` step then checks the three ways this is still broken afterwards,
+because all three look identical from the desktop - nothing happens:
+
+- **no capture device**, which on a desktop with no webcam is the correct
+  answer and is reported as such, not as a failure;
+- **a node you cannot open**, see below;
+- **the tools missing**, if the packages step was interrupted.
+
+### `/dev/video0` is not the camera
+
+A UVC device registers *two* nodes: one that produces frames and one that
+produces per-frame metadata. So a laptop with two cameras has four
+`/dev/video*`, and anything that reaches for `/dev/video0` is right by luck -
+luck that runs out when a USB camera is unplugged and replugged and the
+numbers move.
+
+The trap is that the obvious way to tell them apart reads the wrong field.
+`v4l2-ctl --info` prints both:
+
+```
+Capabilities  : 0x84a00001    the union over every node this device owns
+Device Caps   : 0x04a00000    this node alone
+```
+
+`Capabilities` says `Video Capture` for the metadata node too, because some
+node of that device captures. Only `Device Caps` is per-node. Opening a
+metadata node is not an error - it succeeds and then never returns a frame,
+which looks exactly like a camera that is broken or already in use.
+
+udev has already worked this out and leaves the answer on the node, so
+[`camera.sh`](../dotfiles/.config/i3/script/camera.sh) reads that and falls
+back to `Device Caps` only when it is absent:
+
+```sh
+udevadm info --query=property --name=/dev/video0 | grep ID_V4L_CAPABILITIES
+# ID_V4L_CAPABILITIES=:capture:
+```
+
+`camera.sh list` prints what that resolves to, and what has each camera open -
+the answer to the only question a webcam raises in normal use.
+
+### Access is an ACL, not the `video` group
+
+The nodes are `root:video`, which suggests the fix for a camera you cannot
+open is to add yourself to `video`. Usually it is not, and usually you are
+already fine without it: systemd-logind puts an ACL on the device for whoever
+owns the active local session.
+
+```sh
+$ getfacl /dev/video0
+user::rw-
+user:a8:rw-      # <- logind, not the group
+group::rw-
+```
+
+So the check is on the access itself rather than on group membership - the
+group is one of two ways to pass and the less common one. If it does fail, the
+step offers to add you to `video` as the fallback, which needs a full log out
+and back in to take effect. A session that logind does not consider local and
+active - an SSH login, mainly - gets no ACL, and no group membership will make
+the bar's camera button useful there anyway.
+
+## Camera, microphone and speakers, from the bar
+
+The right-hand end of the bar is the hardware you are about to be seen and
+heard through, in the order a call asks for it. Each opens its own settings
+app, and each click goes through
+[`app.sh`](../dotfiles/.config/i3/script/app.sh), which raises the window if
+it is already open rather than starting a second one.
+
+| module | left click | right click |
+| --- | --- | --- |
+| camera | camera settings (`guvcview`) | the same |
+| microphone | mute / unmute | input device settings |
+| volume | mute / unmute (polybar's own) | output device settings |
+
+Three things about that table are deliberate:
+
+**The camera hides itself** when the machine has no capture device -
+`camera.sh present` is the module's `exec-if`, and polybar drops the module
+entirely while it fails: no icon, no padding, no gap. The same config is
+therefore correct on a laptop and on a desktop with nothing plugged in, which
+is the point of installing it from a repo.
+
+**Left click on the volume is not available.** An internal polybar module
+handles left click itself - for `internal/alsa` it toggles mute - and a
+`click-left` written in that section is silently never reached, with nothing
+in polybar's log. That is why the settings are on the right click, and the
+microphone module mirrors the split rather than inventing its own: left
+mutes, right configures.
+
+**The microphone is a module and not just a button** because the desktop had
+no way to answer "is my mic live" at all. `XF86AudioMicMute` toggles it and
+says so for a second and a half, after which the state was invisible again -
+and the volume module beside it is the *speakers*, so a bar that looked
+entirely healthy said nothing about the microphone either way. It follows
+`pactl subscribe` rather than a poll interval, so the glyph turns over in the
+same frame as the keypress; a bar that goes on claiming the microphone is on
+for another second is wrong in the one direction that matters.
+
+The two audio buttons are the same `pavucontrol` on different tabs - `--tab=3`
+for outputs, `--tab=4` for inputs - so the speaker lands on speakers and the
+microphone on microphones. The one thing that cannot do is re-select the tab
+on a window that is *already* open, since `--tab` is read at startup and
+`app.sh` raises rather than relaunches. That trade is deliberate: two mixers
+fighting over one sink show each other's changes a moment late, so a slider
+you drag jumps back under the cursor.
+
 ## What the keys do
 
 `$mod+F1`, or `keys` in a terminal. Both are
@@ -270,6 +399,7 @@ So everything that acts without a visible result reports through one place:
 | `XF86Audio{Raise,Lower}Volume`, `Mute`, `MicMute` | the level, as a progress bar |
 | `$mod+Shift+m` | the monitor layout that is now on screen |
 | `$mod+Shift+c`, `$mod+Shift+r` | whether i3 accepted the config, and the line it refused if it did not |
+| the bar's camera button | why nothing opened - no camera, or the app not installed |
 | plugging a drive in | udiskie's own popup - see [Removable drives](#removable-drives) |
 
 And, deliberately, nothing at all for: locking (the screen goes black, you can
@@ -697,6 +827,9 @@ To unlink everything, swap `--restow` for `--delete`.
   daemon's error through instead of swallowing it.
 - **The keys** - press `$mod+F1` for the list of them, or type `keys`. See
   [What the keys do](#what-the-keys-do).
+- **The camera** - `~/.config/i3/script/camera.sh list` names every camera the
+  system found and says what has each one open. No camera icon on the bar
+  means it found none; see [The webcam](#the-webcam).
 
 ## Network, from the bar
 
