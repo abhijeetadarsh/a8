@@ -172,14 +172,23 @@ def build(clusters, dark=True):
     # the image is mostly made of.
     bg_seed = hls_clusters[0][0]
 
-    # Accent hue: the most colourful cluster, weighted a little by how much of
-    # the image it covers so a stray 40-pixel highlight does not win.
-    accent_seed = max(hls_clusters, key=lambda c: c[0][2] * (0.35 + c[1]))[0]
+    # Accent hue: the most colourful cluster, weighted by how much of the
+    # image it covers so a stray 40-pixel highlight does not win. The
+    # weighting has to be the actual coverage fraction - a flat "+0.35"
+    # floor here used to let any highlight covering a few percent of the
+    # image outscore a dominant colour covering a third of it.
+    accent_seed = max(hls_clusters, key=lambda c: c[0][2] * c[1])[0]
 
     dominant_hue = accent_seed[0] * 360.0
     # A greyscale wallpaper has no opinion about saturation; give the UI a
     # floor so it does not come out completely flat.
     image_sat = clamp(max(c[0][2] for c in hls_clusters), 0.25, 0.85)
+
+    # A genuinely achromatic seed (saturation ~0) has no real hue behind it -
+    # colorsys just defaults it to 0deg (red). Flooring saturation in that
+    # case would paint a colour the wallpaper never had, so the accent floor
+    # only applies once there is an actual hue signal to anchor it to.
+    accent_sat_floor = 0.45 if accent_seed[2] > 0.03 else 0.0
 
     p = {}
 
@@ -211,7 +220,7 @@ def build(clusters, dark=True):
         # This is the colour the whole desktop is keyed on: focused window
         # border, active workspace, rofi selection, cursor, git branch.
         accent = ensure_contrast(
-            (accent_seed[0], 0.68, clamp(accent_seed[2] * 1.35, 0.45, 0.92)),
+            (accent_seed[0], 0.68, clamp(accent_seed[2] * 1.35, accent_sat_floor, 0.92)),
             base,
             CONTRAST_ACCENT,
         )
@@ -229,7 +238,7 @@ def build(clusters, dark=True):
         subtext = ensure_contrast((base[0], 0.30, 0.18), base, CONTRAST_SUBTEXT)
         muted = ensure_contrast((base[0], 0.45, 0.15), base, CONTRAST_CHROME)
         accent = ensure_contrast(
-            (accent_seed[0], 0.40, clamp(accent_seed[2] * 1.2, 0.45, 0.90)),
+            (accent_seed[0], 0.40, clamp(accent_seed[2] * 1.2, accent_sat_floor, 0.90)),
             base,
             CONTRAST_ACCENT,
         )
