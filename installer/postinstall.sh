@@ -247,6 +247,29 @@ PKGS_THEME=(
     gnome-themes-extra
 )
 
+# --- surviving running out of memory ----------------------------------------
+#
+# On a 8GB laptop the machine does not die of a full disk or a bad driver, it
+# dies of a browser. And it does not die the way you would expect - the kernel
+# OOM killer is supposed to shoot the biggest process and leave you working,
+# but it only fires once reclaim has genuinely failed. Before that point the
+# kernel will spend minutes trying: scanning page lists, writing anonymous
+# pages out to swap, faulting them straight back in because they were still
+# in use. Every process, including the ones drawing your screen, blocks in
+# direct reclaim waiting for a page that is not coming.
+#
+# That is the hang. The box is not crashed - it is busy, at 100% of every
+# core, making just enough progress that the OOM killer never triggers. The
+# fan spins up, the pointer stops, and even Caps Lock stops toggling its LED,
+# because setting that LED is a work item on a queue that no longer gets
+# scheduled. There is nothing in the journal afterwards because nothing failed.
+#
+# earlyoom watches free memory and free swap from userspace, on a timer, and
+# kills something *before* the kernel reaches that state. Trading one browser
+# tab for the session is the entire point: the kernel's own killer is correct
+# but arrives after the machine has already been unusable for several minutes.
+PKGS_MEM=( earlyoom )
+
 # --- AUR --------------------------------------------------------------------
 # Built with makepkg directly - see the AUR section below for why there is no
 # helper. jump-bin rather than jump: it ships a prebuilt binary, so this needs
@@ -271,6 +294,7 @@ PKG_GROUPS=(
     "drives|${PKGS_DRIVES[*]}"
     "fonts|${PKGS_FONTS[*]}"
     "theming|${PKGS_THEME[*]}"
+    "memory|${PKGS_MEM[*]}"
     "AUR|${AUR_PKGS[*]}"
 )
 
@@ -912,6 +936,132 @@ EOF
 
     unset -f _write_root
     return 0
+}
+
+# What to do when memory runs out, so that it is a dead tab and not a dead
+# machine.
+#
+# The bug this exists for: the desktop froze completely - pointer dead, Caps
+# Lock LED dead, fan at full - with nothing in the journal. Nothing in the
+# journal is the diagnosis, not a gap in it: no OOM kill, no panic, no GPU
+# reset, no MCE, no I/O error. The log simply stops mid-second while the
+# kernel is still running. That is memory-pressure livelock, and the reason
+# the kernel's own OOM killer did not save the session is that reclaim never
+# quite failed hard enough to summon it.
+#
+# See the PKGS_MEM comment above for the long version. This step is the two
+# settings that follow from it.
+do_memory() {
+    step "memory pressure"
+
+    _write_root() {
+        local path="$1" content
+        content="$(cat)"
+        if [[ -f "$path" ]] && [[ "$(sudo cat "$path" 2>/dev/null)" == "$content" ]]; then
+            return 1
+        fi
+        sudo mkdir -p "$(dirname "$path")"
+        printf '%s\n' "$content" | sudo tee "$path" >/dev/null
+        return 0
+    }
+
+    local rc=0
+
+    # --- reclaim earlier, so it is never desperate --------------------------
+    #
+    # watermark_scale_factor is how much headroom kswapd keeps, in tenths of a
+    # percent of a zone. The default 10 means 1%: on 8GB, kswapd wakes with
+    # about 80MB left and stops as soon as it claws back a little. A browser
+    # allocating faster than that empties the gap between wakeups, and then
+    # allocation happens in *direct* reclaim - on the allocating thread, which
+    # is to say the thread that was drawing your window. 125 gives kswapd an
+    # order of magnitude more room to work in ahead of that, in the background,
+    # where a stall costs nothing visible.
+    #
+    # watermark_boost_factor is a separate mechanism aimed at keeping large
+    # contiguous pages available: on fragmentation it temporarily boosts the
+    # watermarks and reclaims hard to defragment. On a desktop that is mostly
+    # anonymous memory it fires during exactly the moments that are already
+    # tight and turns them into swap storms. 0 turns it off; huge pages are
+    # not what this machine is short of.
+    #
+    # Neither of these caps memory use. They only change when reclaim starts,
+    # which is the difference between it running ahead of the workload and it
+    # running underneath it.
+    if _write_root /etc/sysctl.d/99-memory-pressure.conf <<'EOF'
+# written by postinstall.sh
+# Start reclaiming sooner and in the background, so allocations do not end up
+# in direct reclaim on the thread that was drawing the screen. See
+# docs/postinstall.md.
+vm.watermark_scale_factor = 125
+vm.watermark_boost_factor = 0
+EOF
+    then
+        sudo sysctl --system >/dev/null 2>&1
+        ok "kswapd now reclaims with 12.5% headroom instead of 1%"
+    else
+        note "memory watermarks already tuned"
+    fi
+
+    # --- and a killer that arrives on time ----------------------------------
+    if ! command -v earlyoom >/dev/null; then
+        warn "earlyoom is not installed - the freeze this step exists for can still happen"
+        note "install it with the 'memory' group: ./postinstall.sh --repair"
+        unset -f _write_root
+        return 1
+    fi
+
+    # ExecStart is overridden rather than configured through
+    # /etc/default/earlyoom because the packaging decides whether that file is
+    # read at all, and a setting that silently does nothing is worse here than
+    # one written in full. The empty ExecStart= is required: without it systemd
+    # appends to the unit's command instead of replacing it.
+    #
+    # -m 10,5 / -s 10,5: warn in the journal at 10% free, kill at 5%, and only
+    # when memory *and* swap are both that low - which on this machine means
+    # zswap and the swap partition are also exhausted, i.e. the real thing and
+    # not a moment of cache pressure.
+    #
+    # --prefer is what makes the trade acceptable. Left alone, earlyoom picks
+    # the largest resident process, and the largest process during a Chromium
+    # session is often Xorg holding the framebuffers - killing it takes the
+    # whole desktop and every unsaved window with it. These names are the
+    # comms that actually appear in this machine's past OOM kills (comm is
+    # truncated to 15 characters, which is why it is `Isolated Web Co`).
+    #
+    # --avoid is the other half: never the session, never the compositor,
+    # never the terminal you would use to fix it.
+    #
+    # -r 60 prints a memory report to the journal every minute. That is the
+    # part that pays for itself the next time something does get through: the
+    # last line before a hard poweroff says how much was left, so the failure
+    # stops being invisible. It pairs with the 30s journal sync above.
+    if _write_root /etc/systemd/system/earlyoom.service.d/10-thresholds.conf <<'EOF'
+# written by postinstall.sh
+# Kill one memory hog before the kernel livelocks, and never kill the session.
+# See docs/postinstall.md.
+[Service]
+ExecStart=
+ExecStart=/usr/bin/earlyoom -m 10,5 -s 10,5 -r 60 \
+    --prefer '^(Isolated Web Co|Web Content|chrome|chromium|firefox|electron|java|node|code-oss|code)$' \
+    --avoid '^(Xorg|i3|kitty|polybar|dunst|picom|lightdm|systemd|systemd-.*|dbus-.*|pipewire|pipewire-pulse|wireplumber|NetworkManager|sshd|sudo|bash)$'
+EOF
+    then
+        sudo systemctl daemon-reload >/dev/null 2>&1
+    else
+        note "earlyoom thresholds already set"
+    fi
+
+    if sudo systemctl enable --now earlyoom.service >/dev/null 2>&1; then
+        ok "earlyoom running - a hog dies at 5% free instead of the machine hanging"
+    else
+        bad "could not enable earlyoom.service"
+        note "check it with: systemctl status earlyoom"
+        rc=1
+    fi
+
+    unset -f _write_root
+    return "$rc"
 }
 
 # The i3 config is the one dotfile whose mistakes wait for a keypress.
@@ -1635,6 +1785,7 @@ do_update
 do_packages  || FAILURES=$((FAILURES + 1))
 do_services  || FAILURES=$((FAILURES + 1))
 do_power     || FAILURES=$((FAILURES + 1))
+do_memory    || FAILURES=$((FAILURES + 1))
 do_dotfiles  || FAILURES=$((FAILURES + 1))
 do_notifications || FAILURES=$((FAILURES + 1))
 # After dotfiles: it runs the camera.sh that step links into place.

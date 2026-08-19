@@ -22,61 +22,66 @@ Re-running it is the supported way to fix a half-finished install.
 
 1. **`pacman -Syu`** - refresh and update.
 2. **Packages** - the X server, pipewire, i3, polybar, rofi, picom, kitty,
-   ranger, neovim, fonts, and the Python stack the theme engine needs. The
-   list is grouped by purpose at the top of the script; that is the one place
-   to edit when you want to add something. `speech-dispatcher` and `espeak-ng`
+   ranger, neovim, fonts, and the Python stack the theme engine needs. The list
+   is grouped by purpose at the top of the script; that is the one place to
+   edit when you want to add something. `speech-dispatcher` and `espeak-ng`
    ride along with Firefox - they are what its "Listen" control and any site
    using the Web Speech API talk to, and without both there is no voice and no
    error to explain it. `mpv` is the video player, configured in
    [`dotfiles/.config/mpv/mpv.conf`](../dotfiles/.config/mpv/mpv.conf), and the
-   `drives` group is what makes external disks mount themselves (see
-   [Removable drives](#removable-drives)).
-3. **AUR** - builds `jump-bin` and `i3lock-color` with makepkg directly; no
-   AUR helper is installed (see below).
+   `drives` group is what makes external disks mount themselves (see [Removable
+   drives](#removable-drives)).
+3. **AUR** - builds `jump-bin` and `i3lock-color` with makepkg directly; no AUR
+   helper is installed (see below).
 4. **Services** - NetworkManager, bluetooth, and the pipewire user services.
-5. **Display power** - three root-owned files: `i915 enable_psr=0` (see
-   [Black screen at idle](#black-screen-at-idle) below), full SysRq so a wedged
+5. **Display power** - three root-owned files: `i915 enable_psr=0` (see [Black
+   screen at idle](#black-screen-at-idle) below), full SysRq so a wedged
    session can still be shut down cleanly, and a 30s journal sync so a forced
    poweroff stops eating the logs that explain it. Rebuilds the initramfs only
    when the module option actually changed.
-6. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
+6. **Memory pressure** - installs and configures `earlyoom`, plus two `vm.*`
+   sysctls that make the kernel start reclaiming earlier. This is the step that
+   stops the machine hanging outright when it runs out of RAM; see [Total
+   freeze under memory pressure](#total-freeze-under-memory-pressure). Like the
+   step above it writes root-owned files and is silent on a re-run that would
+   not change them.
+7. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
-   Then it checks the two configs it just linked whose mistakes are silent.
-   For i3: `i3 -C` for the directives, plus a scan of the bindings for the one
-   mistake `i3 -C` cannot see (see
-   [A binding that needs shell logic needs a script](#a-binding-that-needs-shell-logic-needs-a-script)).
-   For polybar: every module named in a `modules-*` line has a `[module/…]`
-   section somewhere, and every `*.sh` the bar calls exists and is executable.
-   polybar has no dry run - `polybar --dump=<key>` looks like one but never
-   builds the bar, so it exits 0 on a config naming a module that does not
-   exist - and `launch.sh` starts it with `-q`, so both faults otherwise show
-   up as an icon that is missing or a button that does nothing.
-7. **Notifications** - creates `~/Pictures/maim` and checks the chain the
+   Then it checks the two configs it just linked whose mistakes are silent. For
+   i3: `i3 -C` for the directives, plus a scan of the bindings for the one
+   mistake `i3 -C` cannot see (see [A binding that needs shell logic needs a
+   script](#a-binding-that-needs-shell-logic-needs-a-script)). For polybar:
+   every module named in a `modules-*` line has a `[module/…]` section
+   somewhere, and every `*.sh` the bar calls exists and is executable. polybar
+   has no dry run - `polybar --dump=<key>` looks like one but never builds the
+   bar, so it exits 0 on a config naming a module that does not exist - and
+   `launch.sh` starts it with `-q`, so both faults otherwise show up as an icon
+   that is missing or a button that does nothing.
+8. **Notifications** - creates `~/Pictures/maim` and checks the chain the
    keybindings report through: `notify-send`, dunst, and the scripts under
    `.config/i3/script/`. Nothing to install or enable - dunst is D-Bus
    activated - but every way this breaks is silent, so it is checked rather
    than assumed. Re-run it from inside the desktop and it sends a real test
    notification. See [Notifications](#notifications).
-8. **Camera** - checks, rather than installs. There is no webcam driver to
-   install: `uvcvideo` is in the kernel and autoloads. What this reports is
-   the three things that do go wrong - no capture device, a device you cannot
-   open, or the userspace to configure it missing - because all three present
-   as the same nothing. See [The webcam](#the-webcam).
-9. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
-   ways into it. See below; a file either of them wrote is rewritten on a
-   re-run, one you wrote yourself is left alone.
-10. **Login screen** - LightDM plus the GTK greeter, configured and enabled, the
-    directory the greeter reads its theme from, and a `display-setup-script` so
-    the greeter arranges the monitors before it draws (see
-    [The greeter's monitor layout](#the-greeters-monitor-layout)).
-11. **Palette** - generates the desktop colour scheme from a wallpaper, so the
-    first login lands on a themed desktop rather than an i3 config error.
-    i3's other generated include, `monitors.conf`, gets an empty placeholder
-    for the same reason: the script cannot work out the real monitor layout
-    without a running X server, and `monitors.sh` rewrites it at every i3 start
-    anyway.
-12. **neovim plugins** - installs and pins them from
+9. **Camera** - checks, rather than installs. There is no webcam driver to
+   install: `uvcvideo` is in the kernel and autoloads. What this reports is the
+   three things that do go wrong - no capture device, a device you cannot open,
+   or the userspace to configure it missing - because all three present as the
+   same nothing. See [The webcam](#the-webcam).
+10. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
+    ways into it. See below; a file either of them wrote is rewritten on a
+    re-run, one you wrote yourself is left alone.
+11. **Login screen** - LightDM plus the GTK greeter, configured and enabled,
+    the directory the greeter reads its theme from, and a
+    `display-setup-script` so the greeter arranges the monitors before it draws
+    (see [The greeter's monitor layout](#the-greeters-monitor-layout)).
+12. **Palette** - generates the desktop colour scheme from a wallpaper, so the
+    first login lands on a themed desktop rather than an i3 config error. i3's
+    other generated include, `monitors.conf`, gets an empty placeholder for the
+    same reason: the script cannot work out the real monitor layout without a
+    running X server, and `monitors.sh` rewrites it at every i3 start anyway.
+13. **neovim plugins** - installs and pins them from
     [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
     deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
     built by this script rather than by whenever you first happen to open nvim.
@@ -565,9 +570,9 @@ only way out is holding the power button.
 **Cause on this hardware:** Panel Self Refresh. The Ice Lake display controller
 hands the panel off to refresh itself, and coming back out of that fails - the
 kernel keeps running, it just never gets a picture again. The tell is that the
-machine is *alive*: it answers SSH, Caps Lock still toggles its LED. A dead
-kernel is a different bug (on this laptop, suspect nouveau's runtime power
-management on the unused MX330 dGPU).
+machine is *alive*: it answers SSH, Caps Lock still toggles its LED. A freeze
+where Caps Lock is dead too is a different bug - see
+[Total freeze under memory pressure](#total-freeze-under-memory-pressure).
 
 **Fix:** `postinstall.sh` writes `options i915 enable_psr=0` to
 `/etc/modprobe.d/i915-psr.conf` and rebuilds the initramfs. That last part is
@@ -603,6 +608,114 @@ previous boot - with the 30s journal sync it survives:
 ```sh
 journalctl -b -1 -p warning --no-pager | tail -40
 ```
+
+## Total freeze under memory pressure
+
+**Symptom:** everything stops at once. The pointer does not move, the keyboard
+does nothing, **Caps Lock does not toggle its LED**, and the fan spins up to
+full and stays there. The only way out is holding the power button. Afterwards
+the journal for that boot just *ends* - no error, no warning, no shutdown.
+
+**That empty journal is the diagnosis, not a gap in it.** Every failure that
+logs something had already been ruled out on this machine:
+
+| suspect | what you would see | what was there |
+| --- | --- | --- |
+| kernel OOM killer | `Out of memory: Killed process …` | nothing in that boot |
+| GPU hang | `i915 … GPU HANG` / `drm … reset` | nothing |
+| storage | `nvme … I/O error`, controller reset | nothing |
+| CPU/RAM fault | `mce`, `Hardware Error` | nothing |
+| soft lockup | `watchdog: BUG: soft lockup` | nothing |
+| thermal | `critical temperature`, throttling | nothing |
+
+**Cause:** memory-pressure livelock. The kernel is not crashed - it is *busy*.
+When the last of RAM and swap goes, reclaim does not fail cleanly; it keeps
+almost succeeding. It scans page lists, writes anonymous pages out to swap, and
+faults them straight back in because they were still being used. Every process
+that wants a page - including the ones drawing your screen and reading your
+keyboard - blocks in **direct reclaim**, on its own thread, waiting for memory
+that is not coming. The kernel's OOM killer only fires once reclaim has
+genuinely failed, and in this state it never quite does, so the machine can
+grind like this for many minutes without ever being rescued.
+
+The fan is the tell that it is a livelock rather than a panic: a panicked
+kernel stops driving anything, while this one is running every core flat out.
+And Caps Lock is the tell that it is not merely X that died - setting that LED
+is a work item on a queue that no longer gets scheduled, so a dead Caps Lock
+means the kernel itself is starved, not just the session.
+
+On 8GB this is a browser-and-Electron problem, and it had been coming for a
+while: the OOM killer had already fired fourteen times in the ten days before
+the freeze, on `Isolated Web Co` (a Chromium content process), `electron` and
+`java`. Those were the times it worked. The freeze is the time it did not.
+
+**Fix:** `do_memory()` in `postinstall.sh`, which is two separate things.
+
+*Reclaim earlier*, in `/etc/sysctl.d/99-memory-pressure.conf`:
+
+```sh
+vm.watermark_scale_factor = 125   # was 10
+vm.watermark_boost_factor = 0     # was 15000
+```
+
+`watermark_scale_factor` is how much headroom `kswapd` keeps, in tenths of a
+percent. The default 10 means 1% - on 8GB, `kswapd` wakes with about 80MB left
+and stops again as soon as it recovers a little, and anything allocating faster
+than that empties the gap between wakeups and lands in direct reclaim. 125 lets
+`kswapd` work an order of magnitude further ahead, in the background, where a
+stall costs nothing visible. `watermark_boost_factor` is a different mechanism
+that reclaims hard to keep large contiguous pages available; on a desktop that
+is mostly anonymous memory it fires during the moments that are already tight
+and turns them into swap storms. Neither setting caps memory use - they only
+change *when* reclaim starts.
+
+*And a killer that arrives on time* - `earlyoom`, which watches free memory and
+free swap from userspace on a timer and kills something before the kernel can
+reach that state at all. It is configured in a drop-in at
+`/etc/systemd/system/earlyoom.service.d/10-thresholds.conf`:
+
+- `-m 10,5 -s 10,5` - warn at 10% free, kill at 5%, and only when memory *and*
+  swap are both that low.
+- `--prefer` the browser and Electron comms. This matters more than it looks:
+  left alone `earlyoom` kills the largest resident process, and during a
+  Chromium session that is often `Xorg` holding the framebuffers - which takes
+  the whole desktop and every unsaved window with it. Trading one tab is the
+  entire point.
+- `--avoid` `Xorg`, `i3`, `kitty`, `polybar`, `picom`, the systemd and D-Bus
+  processes, pipewire. Never the session, never the terminal you would use to
+  fix it.
+- `-r 60` writes a memory report to the journal every minute. Together with the
+  30s journal sync from the step above, that is what makes a *next* time
+  legible: the last line before a forced poweroff says how much was left.
+
+Note that the process names are matched against `comm`, which the kernel
+truncates to 15 characters - that is why the pattern says `Isolated Web Co` and
+not `Isolated Web Content`. If you add a program, check what it actually calls
+itself:
+
+```sh
+ps -eo comm,rss --sort=-rss | head
+```
+
+**Confirm it is working:**
+
+```sh
+systemctl status earlyoom              # active, and the argv it was given
+sysctl vm.watermark_scale_factor       # 125
+journalctl -u earlyoom -n 5            # the per-minute memory reports
+```
+
+`earlyoom` also has a `--dryrun` mode if you want to watch what it *would*
+kill before trusting it with the real thing.
+
+**This does not add memory.** It changes running out from a hang into a
+notification that something died. If it starts killing things you wanted, the
+answer is fewer Chromium tabs, or more RAM, or `zram` - which
+[`archsetup.py`](../installer/archsetup.py) offers as a swap option at install
+time, and which this machine did not take (it has a 6GB swap partition with
+`zswap` in front of it instead). Adding `zram` on top of an existing `zswap`
+setup means disabling `zswap` first - the two do the same job in different
+places and stacking them just compresses everything twice.
 
 ## neovim
 
