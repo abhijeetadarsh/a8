@@ -39,13 +39,21 @@ Re-running it is the supported way to fix a half-finished install.
    session can still be shut down cleanly, and a 30s journal sync so a forced
    poweroff stops eating the logs that explain it. Rebuilds the initramfs only
    when the module option actually changed.
-6. **Memory pressure** - installs and configures `earlyoom`, plus two `vm.*`
+6. **Discrete GPU** - on an Optimus laptop, bans the NVIDIA card outright:
+   blacklists `nouveau` and adds a udev rule that lets the card power all the
+   way down. Nothing renders on it, and the driver was hard-locking the machine
+   (see [Freeze with memory to spare](#freeze-with-memory-to-spare)). Guarded
+   three ways - it only fires on a class `0302` "3D controller" with an
+   Intel/AMD display GPU beside it and no proprietary `nvidia` package
+   installed - so it does nothing on a desktop, on AMD, or on a machine where
+   you actually use the card.
+7. **Memory pressure** - installs and configures `earlyoom`, plus two `vm.*`
    sysctls that make the kernel start reclaiming earlier. This is the step that
    stops the machine hanging outright when it runs out of RAM; see [Total
    freeze under memory pressure](#total-freeze-under-memory-pressure). Like the
    step above it writes root-owned files and is silent on a re-run that would
    not change them.
-7. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
+8. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
    Then it checks the two configs it just linked whose mistakes are silent. For
@@ -58,30 +66,30 @@ Re-running it is the supported way to fix a half-finished install.
    bar, so it exits 0 on a config naming a module that does not exist - and
    `launch.sh` starts it with `-q`, so both faults otherwise show up as an icon
    that is missing or a button that does nothing.
-8. **Notifications** - creates `~/Pictures/maim` and checks the chain the
+9. **Notifications** - creates `~/Pictures/maim` and checks the chain the
    keybindings report through: `notify-send`, dunst, and the scripts under
    `.config/i3/script/`. Nothing to install or enable - dunst is D-Bus
    activated - but every way this breaks is silent, so it is checked rather
    than assumed. Re-run it from inside the desktop and it sends a real test
    notification. See [Notifications](#notifications).
-9. **Camera** - checks, rather than installs. There is no webcam driver to
+10. **Camera** - checks, rather than installs. There is no webcam driver to
    install: `uvcvideo` is in the kernel and autoloads. What this reports is the
    three things that do go wrong - no capture device, a device you cannot open,
    or the userspace to configure it missing - because all three present as the
    same nothing. See [The webcam](#the-webcam).
-10. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
+11. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
     ways into it. See below; a file either of them wrote is rewritten on a
     re-run, one you wrote yourself is left alone.
-11. **Login screen** - LightDM plus the GTK greeter, configured and enabled,
+12. **Login screen** - LightDM plus the GTK greeter, configured and enabled,
     the directory the greeter reads its theme from, and a
     `display-setup-script` so the greeter arranges the monitors before it draws
     (see [The greeter's monitor layout](#the-greeters-monitor-layout)).
-12. **Palette** - generates the desktop colour scheme from a wallpaper, so the
+13. **Palette** - generates the desktop colour scheme from a wallpaper, so the
     first login lands on a themed desktop rather than an i3 config error. i3's
     other generated include, `monitors.conf`, gets an empty placeholder for the
     same reason: the script cannot work out the real monitor layout without a
     running X server, and `monitors.sh` rewrites it at every i3 start anyway.
-13. **neovim plugins** - installs and pins them from
+14. **neovim plugins** - installs and pins them from
     [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
     deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
     built by this script rather than by whenever you first happen to open nvim.
@@ -572,7 +580,9 @@ hands the panel off to refresh itself, and coming back out of that fails - the
 kernel keeps running, it just never gets a picture again. The tell is that the
 machine is *alive*: it answers SSH, Caps Lock still toggles its LED. A freeze
 where Caps Lock is dead too is a different bug - see
-[Total freeze under memory pressure](#total-freeze-under-memory-pressure).
+[Total freeze under memory pressure](#total-freeze-under-memory-pressure). One
+where Caps Lock still works but the screen went *mid-use* rather than at idle
+is a third - see [Freeze with memory to spare](#freeze-with-memory-to-spare).
 
 **Fix:** `postinstall.sh` writes `options i915 enable_psr=0` to
 `/etc/modprobe.d/i915-psr.conf` and rebuilds the initramfs. That last part is
@@ -627,6 +637,15 @@ logs something had already been ruled out on this machine:
 | CPU/RAM fault | `mce`, `Hardware Error` | nothing |
 | soft lockup | `watchdog: BUG: soft lockup` | nothing |
 | thermal | `critical temperature`, throttling | nothing |
+
+**One row of that table does not do the work it looks like it does**, which
+only became clear later. The GPU row catches a driver that *recovers* and says
+so; a driver that hard-locks the box mid-transaction logs nothing either, so
+"nothing" there is not an alibi. What actually separates the two is how much
+memory was left: this freeze had none, and the one in
+[Freeze with memory to spare](#freeze-with-memory-to-spare) had 68% free with
+swap untouched. Check that first - `earlyoom`'s per-minute report now puts it
+in the journal for you - and Caps Lock second.
 
 **Cause:** memory-pressure livelock. The kernel is not crashed - it is *busy*.
 When the last of RAM and swap goes, reclaim does not fail cleanly; it keeps
@@ -716,6 +735,96 @@ time, and which this machine did not take (it has a 6GB swap partition with
 `zswap` in front of it instead). Adding `zram` on top of an existing `zswap`
 setup means disabling `zswap` first - the two do the same job in different
 places and stacking them just compresses everything twice.
+
+## Freeze with memory to spare
+
+**Symptom:** the machine dies mid-use exactly like the freeze above - pointer
+gone, keyboard gone, power button the only way out, and a journal for that boot
+that just ends mid-second. The difference is in the last line before it ends:
+
+```
+20:14:53  earlyoom: mem avail: 4209 of 6163 MiB (68.29%), swap free: 100.00%
+20:15:09  systemd: Started app-org.chromium.Chromium-32721.scope
+          <journal ends>
+```
+
+**68% of RAM available and swap completely untouched, sixteen seconds before
+the machine went.** Nothing was short of anything, so none of the memory work
+in the section above applies. Three boots in five days ended this way.
+
+**Telling the two apart mid-hang:** hold Caps Lock.
+
+| | Caps Lock LED | What it is |
+|---|---|---|
+| dead | kernel cannot run the work item that sets it | [memory livelock](#total-freeze-under-memory-pressure) |
+| toggles | kernel is fine, the display went | this, or [PSR](#black-screen-at-idle) if it happened at idle |
+
+**Cause on this hardware:** a GeForce MX330 on `nouveau` that nothing used.
+The panel is wired to the Intel iGPU; the NVIDIA part is a class `0302` *3D
+controller*, which means a GPU with no display outputs at all. No proprietary
+driver was installed either, so nothing could offload to it. All it did was
+runtime-suspend and resume under a driver with no reclocking firmware:
+
+```
+nouveau 0000:01:00.0: pmu: firmware unavailable
+```
+
+which is a well-known hard lock on Pascal. Xorg had even auto-attached it as a
+secondary GPU screen and `mmap`'d it, for no benefit whatsoever:
+
+```
+[5.641] (II) modeset(0):  using drv /dev/dri/card1    <- Intel, the actual display
+[5.642] (II) modeset(G0): using drv /dev/dri/card0    <- nouveau, along for the ride
+```
+
+**Fix:** ban the driver rather than tune it. `do_gpu()` writes
+`/etc/modprobe.d/blacklist-nouveau.conf`, rebuilds the initramfs, and adds
+`modprobe.blacklist=nouveau` to the GRUB command line as a backstop. The
+`install nouveau /bin/false` line matters as much as the `blacklist` one -
+`blacklist` alone only stops autoload by modalias, and an explicit `modprobe`
+or a dependency pull still brings the module in.
+
+**The second half is easy to miss and inverts the result.** With no driver
+bound, the PCI core calls `pm_runtime_forbid()` on the device, so
+`power/control` defaults to `on` and the card sits *awake and idle* - worse for
+battery than leaving `nouveau` to suspend it. The udev rule sets it back to
+`auto`, which lets the PCI core drop the card and its parent PCIe port into
+D3cold, the state where the slot actually loses power.
+
+**Confirm it is working**, a minute or two after boot:
+
+```sh
+lsmod | grep nouveau                                   # nothing
+lspci -nnk -s 01:00.0 | grep -i 'driver in use'        # nothing
+ls /sys/class/drm/ | grep card                         # card1 only, no card0
+cat /sys/bus/pci/devices/0000:01:00.0/power_state      # D3cold
+```
+
+That last one reads `D0` for the first minute after boot, before the PCIe
+port's autosuspend delay elapses. Measuring too early looks exactly like a
+failure and is not one.
+
+**The card still appears in `lspci` and in fastfetch.** It is soldered to the
+board; blacklisting a driver does not unsolder it. Those tools enumerate the
+PCI bus, not what the kernel is using - the `driver in use` line is the one
+that answers that question.
+
+**This diagnosis is provisional.** It is circumstantial - three freezes with
+memory free, an empty journal, and a known-bad driver on a card serving no
+purpose - and the suspect is removed rather than convicted. It takes a few
+weeks without a hard cut to call it. If one happens anyway, check Caps Lock,
+then read the tail of the previous boot:
+
+```sh
+journalctl -b -1 --no-pager | tail -40
+```
+
+**If you want the card back**, remove
+`/etc/modprobe.d/blacklist-nouveau.conf` and the
+`modprobe.blacklist=nouveau` fragment from `/etc/default/grub`, then
+`sudo mkinitcpio -P && sudo grub-mkconfig -o /boot/grub/grub.cfg`. The better
+answer is the proprietary `nvidia` package, which handles Optimus power
+management properly - `do_gpu()` detects it and stands down.
 
 ## neovim
 

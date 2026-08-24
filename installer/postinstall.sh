@@ -938,6 +938,194 @@ EOF
     return 0
 }
 
+# A discrete GPU that nothing renders on, and the freeze it caused.
+#
+# The bug this exists for looks identical to the memory livelock below - the
+# desktop dies, the journal ends mid-second, there is no OOM kill, no MCE, no
+# GPU reset and no panic - but it is a different fault, and the tell is that
+# memory was *fine* each time: 58-68% available with swap completely untouched
+# seconds before the machine went. Nothing was short of anything.
+#
+# The Caps Lock LED is what separates the two by hand, mid-hang: dead means
+# the kernel itself is starved and cannot run the work item that sets it, so
+# it is the livelock below; alive means the kernel is fine and the display
+# went out from under it, so it is this.
+#
+# What was left holding the display here: a GeForce MX330 on nouveau that
+# nothing used. The panel is wired to the Intel iGPU, the NVIDIA part is a
+# class 0302 "3D controller" - a GPU with no display outputs at all, which is
+# what Optimus means - and with no proprietary driver installed nothing could
+# offload to it either. All it did was runtime-suspend and resume under a
+# driver with no reclocking firmware ("pmu: firmware unavailable"), which is a
+# well-known hard lock on Pascal. Xorg had even auto-attached it as a
+# secondary GPU screen and mmap'd it, for no benefit whatsoever.
+#
+# So the fix is to ban the driver rather than tune it. On this class of
+# machine the card is dead weight, and the battery is better off without it.
+do_gpu() {
+    step "discrete GPU"
+
+    _write_root() {
+        local path="$1" content
+        content="$(cat)"
+        if [[ -f "$path" ]] && [[ "$(sudo cat "$path" 2>/dev/null)" == "$content" ]]; then
+            return 1
+        fi
+        sudo mkdir -p "$(dirname "$path")"
+        printf '%s\n' "$content" | sudo tee "$path" >/dev/null
+        return 0
+    }
+
+    # --- is this even the right machine? ------------------------------------
+    #
+    # Three guards, because this step disables a graphics driver and getting
+    # it wrong means a black screen on hardware I cannot see.
+    #
+    # Class 0302 is the load-bearing one. A "3D controller" has no display
+    # outputs wired to it, so nothing can be lost by refusing to load its
+    # driver. A class 0300 "VGA compatible controller" may well be driving the
+    # panel - on a desktop with a single NVIDIA card it certainly is - and
+    # blacklisting that leaves you staring at nothing.
+    local dgpu
+    dgpu="$(lspci -nn 2>/dev/null | grep -E '\[0302\]' | grep -i nvidia | head -1)"
+    if [[ -z "$dgpu" ]]; then
+        note "no Optimus NVIDIA GPU on this machine - nothing to ban"
+        unset -f _write_root
+        return 0
+    fi
+
+    # And something else has to be driving the screen.
+    if ! lspci -nn 2>/dev/null | grep -E '\[0300\]' | grep -qiE 'intel|amd|ati'; then
+        warn "NVIDIA 3D controller found, but no Intel/AMD display GPU beside it"
+        note "not touching the driver - that combination could be the display"
+        unset -f _write_root
+        return 0
+    fi
+
+    # If the proprietary driver is installed, the card is wanted. This step
+    # bans a card nothing uses; it does not overrule a deliberate choice.
+    if pacman -Qq 2>/dev/null | grep -qE '^nvidia(-open|-dkms|-open-dkms|-lts)?$'; then
+        note "the proprietary nvidia driver is installed, so the card is in use"
+        note "leaving it alone - remove that package first if you want it banned"
+        unset -f _write_root
+        return 0
+    fi
+
+    note "found ${dgpu#*: }"
+
+    local rc=0 initramfs=0
+
+    # --- stop the driver loading -------------------------------------------
+    #
+    # `blacklist` alone only stops autoload by modalias, which is most of the
+    # problem but not all of it: an explicit modprobe or a dependency pull
+    # still brings it in. `install ... /bin/false` closes that, so the module
+    # cannot load at all.
+    #
+    # This has to reach the initramfs to work. The `kms` hook pulls DRM
+    # drivers into the image and loads them before /etc is mounted, so the
+    # blacklist has to be in there with them - which is what mkinitcpio's
+    # `modconf` hook does by copying /etc/modprobe.d in.
+    if _write_root /etc/modprobe.d/blacklist-nouveau.conf <<'EOF'
+# written by postinstall.sh
+# Ban the Optimus discrete GPU. Nothing renders on it - the panel is on the
+# iGPU and no proprietary driver is installed - and nouveau's runtime
+# suspend/resume on Pascal hard-locks the machine with an empty journal.
+# See docs/postinstall.md.
+blacklist nouveau
+blacklist nouveaufb
+install nouveau /bin/false
+EOF
+    then
+        ok "wrote /etc/modprobe.d/blacklist-nouveau.conf"
+        initramfs=1
+    else
+        note "/etc/modprobe.d/blacklist-nouveau.conf already correct"
+    fi
+
+    # --- and keep the card powered off --------------------------------------
+    #
+    # This half is easy to miss and it inverts the result. With no driver
+    # bound the PCI core calls pm_runtime_forbid() on the device, so
+    # power/control defaults to "on" and the card sits awake and idle - which
+    # is *worse* for battery than leaving nouveau to suspend it. Setting it
+    # back to "auto" lets the PCI core drop the device and its parent PCIe
+    # port into D3cold, which is the state where the slot actually loses
+    # power.
+    #
+    # Verify with, a minute or so after boot (it is D0 until the port's
+    # autosuspend delay elapses - measuring too early looks like a failure):
+    #   cat /sys/bus/pci/devices/0000:01:00.0/power_state   # want D3cold
+    if _write_root /etc/udev/rules.d/60-nvidia-dgpu-powerdown.rules <<'EOF'
+# written by postinstall.sh
+# Let the PCI core power down the banned discrete GPU. Without this a
+# driverless device stays at "on" and burns power doing nothing.
+# class 0x030200 = 3D controller, vendor 0x10de = NVIDIA.
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030200", ATTR{power/control}="auto"
+EOF
+    then
+        sudo udevadm control --reload >/dev/null 2>&1
+        sudo udevadm trigger --subsystem-match=pci --attr-match=vendor=0x10de >/dev/null 2>&1
+        ok "the card may now drop to D3cold instead of idling powered"
+    else
+        note "GPU power-down rule already in place"
+    fi
+
+    if ! grep -qE '^HOOKS=.*\bmodconf\b' /etc/mkinitcpio.conf 2>/dev/null; then
+        warn "mkinitcpio has no 'modconf' hook - /etc/modprobe.d is not in the initramfs"
+        note "add modconf to HOOKS in /etc/mkinitcpio.conf, or nouveau still loads at boot"
+        rc=1
+    elif (( initramfs )); then
+        note "rebuilding the initramfs so the blacklist applies at boot..."
+        if sudo mkinitcpio -P >/dev/null 2>&1; then
+            ok "initramfs rebuilt"
+        else
+            bad "mkinitcpio failed - run 'sudo mkinitcpio -P' and read the output"
+            rc=1
+        fi
+    fi
+
+    # --- belt and braces on the kernel command line -------------------------
+    #
+    # Not load-bearing: the modprobe.d file above already does the job once it
+    # is in the initramfs. This is the backstop for the case where it is not -
+    # a missing modconf hook, a hand-edited mkinitcpio.conf - because the
+    # kernel parses modprobe.blacklist= before any of that matters.
+    #
+    # Only GRUB is edited. archsetup.py also offers systemd-boot and rEFInd,
+    # and quietly rewriting whichever of those is installed is more ways to
+    # break somebody's boot than this backstop is worth.
+    if [[ -f /etc/default/grub ]] && command -v grub-mkconfig >/dev/null 2>&1; then
+        if grep -q 'modprobe\.blacklist=nouveau' /etc/default/grub; then
+            note "kernel command line already carries the blacklist"
+        elif grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT="[^"]*"' /etc/default/grub; then
+            sudo sed -i 's/^\(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*\)"/\1 modprobe.blacklist=nouveau"/' \
+                /etc/default/grub
+            if sudo grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1; then
+                ok "kernel command line carries the blacklist too"
+            else
+                bad "grub-mkconfig failed - check /etc/default/grub and run it by hand"
+                rc=1
+            fi
+        else
+            note "GRUB_CMDLINE_LINUX_DEFAULT is not in the expected form - left alone"
+        fi
+    else
+        note "not GRUB, so no command-line backstop was added"
+        note "optional: add modprobe.blacklist=nouveau to your bootloader's parameters"
+    fi
+
+    # --- say what is actually true right now --------------------------------
+    if lsmod 2>/dev/null | grep -q '^nouveau'; then
+        note "nouveau is still loaded from this boot - it goes on the next one"
+    else
+        ok "nouveau is not loaded"
+    fi
+
+    unset -f _write_root
+    return "$rc"
+}
+
 # What to do when memory runs out, so that it is a dead tab and not a dead
 # machine.
 #
@@ -1785,6 +1973,7 @@ do_update
 do_packages  || FAILURES=$((FAILURES + 1))
 do_services  || FAILURES=$((FAILURES + 1))
 do_power     || FAILURES=$((FAILURES + 1))
+do_gpu       || FAILURES=$((FAILURES + 1))
 do_memory    || FAILURES=$((FAILURES + 1))
 do_dotfiles  || FAILURES=$((FAILURES + 1))
 do_notifications || FAILURES=$((FAILURES + 1))
