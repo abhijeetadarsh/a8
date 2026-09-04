@@ -1288,9 +1288,54 @@ already running: two ways to join a network, one of them a reimplementation of
 the other. The tray is the one that comes with NetworkManager and handles the
 cases a menu should not try to, so it is the one that stayed.
 
-The example modules in `modules.ini` use `interface-type = wireless|wired`
-rather than an interface name - `interface = wlp2s0` works on exactly one
-machine.
+### The speed meter follows the route, not the interface
+
+The bar shows one live up/down readout, from
+[`netspeed.sh`](../dotfiles/.config/i3/script/netspeed.sh).
+
+It used to be two: `[module/wired-network]` and `[module/wireless-network]`,
+side by side, each hiding itself when its interface type was not connected. The
+reasoning was that a laptop is on a dongle or on wifi but never both, so exactly
+one would ever be visible. **That is false, and it showed as two speed meters on
+the bar** - a phone tethered over USB while wifi is still associated brings up
+both interfaces at once:
+
+```
+$ ip route show default
+default via 10.138.253.74 dev enp0s20f0u1  metric 100   <- carries the traffic
+default via 192.168.1.1   dev wlp2s0       metric 600   <- up, unused
+```
+
+Both modules render, and only one of them is counting anything.
+
+No configuration fixes that. `internal/network` selects by interface *type*;
+neither module can know the other exists, let alone which one owns the default
+route. And that is the question a speed meter is really being asked - "which
+link am I actually using" - which interface type was never able to answer.
+
+So there is one module, and it asks the kernel:
+
+```
+$ netspeed.sh iface
+enp0s20f0u1
+  chosen by: ip route get (the kernel's own choice)
+```
+
+`ip route get` rather than comparing metrics by hand, because it accounts for
+policy rules, VPN tables and everything else that decides where a packet really
+goes - all of which a metric comparison here would have to reimplement and would
+eventually get wrong. Two links up stops being a special case: it is a routing
+table with a winner. Unplug the tether and the meter follows wifi on the next
+tick, with no restart.
+
+Still no interface name anywhere. `interface = wlp2s0` works on exactly one
+machine, which is why the old modules used `interface-type` and why this one
+uses the route.
+
+It is `tail = true` with the script's own one-second loop rather than
+`interval = 1`, because a rate is a difference between two samples and the
+reader has to hold the previous one. polybar re-execing the script every second
+would hand it a fresh process with nothing to subtract from.
 
 ## The system tray
 
