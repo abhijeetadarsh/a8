@@ -9,6 +9,7 @@
 #   brightness.sh off     OUTPUT         blank the backlight, remembering the level
 #   brightness.sh on      OUTPUT         bring it back to where it was
 #   brightness.sh toggle  OUTPUT         whichever of those two applies
+#   brightness.sh wake                   un-blank every screen, no target needed
 #   brightness.sh watch   OUTPUT         the bar's readout; never exits
 #   brightness.sh status  OUTPUT         that readout once, and exit
 #   brightness.sh supported OUTPUT       exit 0 if OUTPUT can be dimmed at all
@@ -430,7 +431,13 @@ render() {
     # need to know is that the screen is off on purpose and a click brings it
     # back.
     if [[ -e "$(state "$out" blanked)" ]]; then
-        printf '%s off\n' "${GLYPHS[0]}"
+        # Padded out on purpose. The screen this is drawn on is black, so the
+        # only way back with a pointer is a click you cannot aim, and a wider
+        # module is a wider thing to hit blindly along the top edge. It costs
+        # nothing: the one bar where this is ever rendered is one nobody can
+        # see. The reliable way back is still a key - see the bindings in the
+        # i3 config.
+        printf '%s     off     \n' "${GLYPHS[0]}"
     else
         printf '%s %s%%\n' "$(glyph_for "$v")" "$v"
     fi
@@ -497,11 +504,23 @@ ACTION="${1:-list}"
 # the polybar that launch.sh started with MONITOR set, so the value is simply
 # already in the environment.
 #
-# The primary fallback is for launch.sh's last-resort single-bar path, when
-# RandR named no outputs at all and MONITOR is genuinely unset.
+# From a keybinding there is no $MONITOR at all - i3 execs with its own
+# environment, not a bar's - so the next question is which screen you are
+# actually working on, and i3 is the only thing that knows. That is what makes
+# a brightness key act on the monitor you are looking at instead of always the
+# primary one.
+#
+# The primary fallback is last: for launch.sh's single-bar path, and for any
+# call made when i3 is not answering.
 resolve_output() {
     local out="${1:-}"
     [[ -z "$out" ]] && out="${MONITOR:-}"
+
+    if [[ -z "$out" ]] && command -v i3-msg >/dev/null && command -v jq >/dev/null; then
+        out="$(i3-msg -t get_workspaces 2>/dev/null |
+            jq -r 'map(select(.focused)) | .[0].output // empty' 2>/dev/null)"
+    fi
+
     if [[ -z "$out" ]]; then
         out="$(xrandr --query 2>/dev/null | awk '/ connected primary/ {print $1; exit}')"
         [[ -z "$out" ]] && out="$(xrandr --query 2>/dev/null | awk '/ connected/ {print $1; exit}')"
@@ -561,6 +580,33 @@ case "$ACTION" in
                 ;;
         esac
         poke "$OUT"
+        ;;
+
+    wake)
+        # Restore every blanked screen at once, with no argument, no focus and
+        # no aiming. This is the one to bind to a key: when a panel is dark the
+        # things you would normally use to pick a target - seeing which monitor
+        # it is, finding the module, hitting it - are exactly what you have
+        # lost. Doing nothing quietly when nothing is blanked is the point; it
+        # makes the key safe to hit whenever you are unsure.
+        [[ -s "$MAP" ]] || map_build || die "could not work out what the outputs are"
+        woke=0
+        while IFS=$'\t' read -r name backend arg; do
+            [[ -n "$name" ]] || continue
+            [[ -e "$(state "$name" blanked)" ]] || continue
+            BACKEND="$backend" ARG="$arg"
+            if unblank "$name"; then
+                poke "$name"
+                woke=$(( woke + 1 ))
+            fi
+        done < "$MAP"
+
+        if (( WANT_NOTIFY )) && [[ -x "$NOTIFY" ]]; then
+            if (( woke )); then
+                "$NOTIFY" -i display-brightness -t brightness-wake -T 1500 \
+                    "Displays" "$woke screen(s) back on"
+            fi
+        fi
         ;;
 
     get)

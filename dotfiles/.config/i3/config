@@ -148,6 +148,27 @@ bindsym XF86AudioMute exec --no-startup-id $HOME/.config/i3/script/volume.sh mut
 #: mute the microphone
 bindsym XF86AudioMicMute exec --no-startup-id $HOME/.config/i3/script/volume.sh micmute
 
+#:: Screen
+# Brightness, on the monitor you are working on rather than "the" screen - see
+# docs/postinstall.md. These keys were dead before: nothing was bound to them,
+# and the bar had no brightness control either.
+#
+# No output is passed. brightness.sh asks i3 which output is focused, because a
+# keybinding has no $MONITOR the way a bar module does - i3 execs with its own
+# environment.
+#: brightness up, on the focused monitor
+bindsym XF86MonBrightnessUp exec --no-startup-id $HOME/.config/i3/script/brightness.sh up --notify
+#: brightness down, on the focused monitor
+bindsym XF86MonBrightnessDown exec --no-startup-id $HOME/.config/i3/script/brightness.sh down --notify
+#: blank the focused monitor to save power, or bring it back
+bindsym $mod+b exec --no-startup-id $HOME/.config/i3/script/brightness.sh toggle
+# The way back that needs no aim. A blanked screen is black, so the module you
+# would click is invisible and the monitor it belongs to is hard to identify -
+# this restores every blanked screen at once and does nothing when none is.
+# Safe to hit whenever you are unsure, which is the point of having it.
+#: bring every blanked screen back
+bindsym $mod+Shift+b exec --no-startup-id $HOME/.config/i3/script/brightness.sh wake --notify
+
 # Use Mouse+$mod to drag floating windows to their wanted position
 floating_modifier $mod
 

@@ -479,11 +479,32 @@ this action on purpose. That floor exists so a stray scroll cannot put a screen
 into darkness you then cannot see to undo; blanking is not a stray scroll, and
 it saves the level so the way back is one click.
 
-One caveat worth knowing before you middle click the laptop bar: the panel goes
-black, the bar goes with it, and the way back is a second middle click on a spot
-you can no longer see. It works - the module is still running and the click
-still lands - it is just blind. On the external monitor, where the laptop screen
-stays lit, none of that applies.
+### Getting a blanked screen back
+
+Three ways, and the pointer is the worst of them:
+
+| | what it does |
+| --- | --- |
+| `Super+Shift+b` | brings **every** blanked screen back. No target, no aim. |
+| `XF86MonBrightness` up/down | any level change un-blanks, so the brightness keys wake the focused monitor as a side effect of doing the obvious thing |
+| `Super+b` | toggles the focused monitor - the keyboard twin of the middle click |
+| middle click | works, but you are aiming at a module on a black screen |
+
+The middle click is kept because it is the natural thing to reach for when only
+the *other* monitor is dark. It is a poor way back when the screen you blanked
+is the one you are looking at: the panel is black, the bar is black, and you are
+clicking at a remembered position. The module does pad itself out when blanked,
+so the target along the top edge is much wider than the usual `󰃟 81%` - but a
+wider invisible target is still an invisible target.
+
+**`Super+Shift+b` is the one to remember.** It needs no focus, no pointer and no
+knowledge of which screen went dark, it restores each screen to the level it
+had, and it does nothing at all when nothing is blanked - so it is safe to hit
+whenever you are unsure. Keybindings take no `$MONITOR`, so `brightness.sh` asks
+i3 which output is focused for the two that need a target; `wake` needs none.
+
+Those keys were dead before this: nothing was bound to
+`XF86MonBrightnessUp`/`Down` at all.
 
 ### The polybar trap this hit
 
