@@ -47,13 +47,20 @@ Re-running it is the supported way to fix a half-finished install.
    Intel/AMD display GPU beside it and no proprietary `nvidia` package
    installed - so it does nothing on a desktop, on AMD, or on a machine where
    you actually use the card.
-7. **Memory pressure** - installs and configures `earlyoom`, plus two `vm.*`
+7. **Brightness** - installs `brightnessctl` and `ddcutil`, sets `i2c-dev` to
+   load at boot and puts you in the `i2c` group, which is what an external
+   monitor needs before its backlight can be reached at all. The internal panel
+   needs none of it. Nothing here is fatal: a machine with no DDC-capable
+   monitor just loses the external half, and the bar module hides itself on any
+   output it cannot dim. See [Brightness, per
+   monitor](#brightness-per-monitor).
+8. **Memory pressure** - installs and configures `earlyoom`, plus two `vm.*`
    sysctls that make the kernel start reclaiming earlier. This is the step that
    stops the machine hanging outright when it runs out of RAM; see [Total
    freeze under memory pressure](#total-freeze-under-memory-pressure). Like the
    step above it writes root-owned files and is silent on a re-run that would
    not change them.
-8. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
+9. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
    Then it checks the two configs it just linked whose mistakes are silent. For
@@ -66,30 +73,30 @@ Re-running it is the supported way to fix a half-finished install.
    bar, so it exits 0 on a config naming a module that does not exist - and
    `launch.sh` starts it with `-q`, so both faults otherwise show up as an icon
    that is missing or a button that does nothing.
-9. **Notifications** - creates `~/Pictures/maim` and checks the chain the
+10. **Notifications** - creates `~/Pictures/maim` and checks the chain the
    keybindings report through: `notify-send`, dunst, and the scripts under
    `.config/i3/script/`. Nothing to install or enable - dunst is D-Bus
    activated - but every way this breaks is silent, so it is checked rather
    than assumed. Re-run it from inside the desktop and it sends a real test
    notification. See [Notifications](#notifications).
-10. **Camera** - checks, rather than installs. There is no webcam driver to
+11. **Camera** - checks, rather than installs. There is no webcam driver to
    install: `uvcvideo` is in the kernel and autoloads. What this reports is the
    three things that do go wrong - no capture device, a device you cannot open,
    or the userspace to configure it missing - because all three present as the
    same nothing. See [The webcam](#the-webcam).
-11. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
+12. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
     ways into it. See below; a file either of them wrote is rewritten on a
     re-run, one you wrote yourself is left alone.
-12. **Login screen** - LightDM plus the GTK greeter, configured and enabled,
+13. **Login screen** - LightDM plus the GTK greeter, configured and enabled,
     the directory the greeter reads its theme from, and a
     `display-setup-script` so the greeter arranges the monitors before it draws
     (see [The greeter's monitor layout](#the-greeters-monitor-layout)).
-13. **Palette** - generates the desktop colour scheme from a wallpaper, so the
+14. **Palette** - generates the desktop colour scheme from a wallpaper, so the
     first login lands on a themed desktop rather than an i3 config error. i3's
     other generated include, `monitors.conf`, gets an empty placeholder for the
     same reason: the script cannot work out the real monitor layout without a
     running X server, and `monitors.sh` rewrites it at every i3 start anyway.
-14. **neovim plugins** - installs and pins them from
+15. **neovim plugins** - installs and pins them from
     [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
     deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
     built by this script rather than by whenever you first happen to open nvim.
@@ -284,8 +291,10 @@ the bar's camera button useful there anyway.
 ## Camera, microphone and speakers, from the bar
 
 The right-hand end of the bar is the hardware you are about to be seen and
-heard through, in the order a call asks for it. Each opens its own settings
-app, and each click goes through
+heard through, in the order a call asks for it, with the screen's own control
+at the head of it (see [Brightness, per monitor](#brightness-per-monitor);
+that one is scrolled, not clicked). Each of the three below opens its own
+settings app, and each click goes through
 [`app.sh`](../dotfiles/.config/i3/script/app.sh), which raises the window if
 it is already open rather than starting a second one.
 
@@ -326,6 +335,110 @@ on a window that is *already* open, since `--tab` is read at startup and
 `app.sh` raises rather than relaunches. That trade is deliberate: two mixers
 fighting over one sink show each other's changes a moment late, so a slider
 you drag jumps back under the cursor.
+
+## Brightness, per monitor
+
+Scroll the sun at the left of the bar's right-hand group. It moves the screen
+that bar is drawn on, in steps of 5%, and no other screen.
+
+That last part is the whole feature. There is no such thing as "the"
+brightness on a two-screen desktop, and the two screens are not even reached
+the same way:
+
+| | internal panel | external monitor |
+| --- | --- | --- |
+| where the control lives | `/sys/class/backlight` | the monitor's own controller |
+| how it is reached | `brightnessctl`, via logind | `ddcutil`, DDC/CI over i2c |
+| a write costs | ~3ms | ~240ms |
+| a read costs | ~3ms | ~400ms |
+| can it fail | no | yes - DDC/CI is optional and can be off in the OSD |
+
+An external monitor has no backlight device at all. `/sys/class/backlight` only
+ever lists panels wired to the GPU's own backlight controller, which on a
+laptop means the built-in screen; everything else has to be asked over the i2c
+bus behind the video cable, in a protocol the monitor is free not to speak.
+That is what [step 7](#what-it-does-in-order) sets up, and why it can honestly
+report having found nothing.
+
+Both live behind
+[`brightness.sh`](../dotfiles/.config/i3/script/brightness.sh):
+
+```
+brightness.sh list                 every output, its backend, its level
+brightness.sh up   HDMI-1          raise one screen by a step
+brightness.sh set  eDP-1 40        jump to a level
+brightness.sh get  eDP-1           the level, as a bare number
+brightness.sh refresh              re-detect after plugging a monitor in
+```
+
+`list` is the one to run when something looks wrong:
+
+```
+$ brightness.sh list
+eDP-1      sysfs  intel_backlight  81%
+HDMI-1     ddc    /dev/i2c-3       25%
+```
+
+An output missing from that table cannot be dimmed, and the bar will not show
+a control for it.
+
+### Why a scroll does not wait for the monitor
+
+A wheel flick is a dozen events in under a second. Sending a dozen 240ms DDC
+writes would still be draining the queue seconds after you stopped, and the
+panel would visibly stair-step through every value on the way. So nothing on
+the scrolling path talks to the monitor at all. A scroll moves a number in a
+file - about 12ms, most of it process startup - and a single background applier
+writes whatever those events added up to, once. Measured, a burst of twelve
+scroll events produces **two** DDC writes and lands on the right value.
+
+The applier holds a lock for its whole life, `ddcutil` calls included, because
+two DDC transactions interleaved on one i2c line do not queue politely - they
+corrupt each other and the monitor ends up somewhere neither side asked for.
+Anything scrolled while an applier is running is picked up by its loop;
+anything scrolled in the instant one is exiting spawns another, which waits for
+the lock and sees the discrepancy for itself.
+
+The level on screen is therefore the value we last *asked* for, not one read
+back from the monitor. That is deliberate: reading it back costs 400ms, the
+number would arrive long after the wheel had moved on, and every change goes
+through this script anyway.
+
+### Why the module is pushed to, not polled
+
+`[module/brightness]` is `tail = true` with no interval. `brightness.sh watch`
+blocks on a fifo and every change writes one byte into it, so the readout turns
+over in the same frame as the wheel. An interval would be worse in both
+directions - laggy on screen, and on a DDC monitor it would mean a 400ms i2c
+read every tick, forever, to re-learn a number we already know.
+
+### The polybar trap this hit
+
+**polybar 3.7 does not expand `${env:...}` inside a module's `exec`, `exec-if`
+or scroll values.** It *does* expand it in bar keys, which is what makes this a
+quiet failure rather than an obvious one: `monitor = ${env:MONITOR:}` in
+`config.ini` works, so the bars land on the right screens, while
+
+```ini
+exec = ~/.config/i3/script/brightness.sh watch ${env:MONITOR:}
+```
+
+runs with the argument silently dropped - and every bar drives the primary
+panel. Confirmed against 3.7.2 with a minimal config: the module's script
+received `argc=1`, the monitor name gone. This is the same class of gap the
+`[bar/main-tray]` comment describes for module lists.
+
+`brightness.sh` reads `$MONITOR` out of its own environment instead. `launch.sh`
+starts one polybar per output with it set, and the module is a child of that
+process, so the value is simply already there with no substitution to go wrong.
+
+### The hardware keys
+
+`XF86MonBrightnessUp` / `Down` are not bound to anything. The script is ready
+for them - `brightness.sh up --notify` raises the screen the pointer is on and
+draws the same tagged dunst popup the volume keys use - but which screen a
+*key* should move is a genuinely different question from which one a scroll
+should, and it has not been answered here yet.
 
 ## What the keys do
 

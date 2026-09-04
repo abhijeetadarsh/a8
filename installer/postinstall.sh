@@ -270,6 +270,24 @@ PKGS_THEME=(
 # but arrives after the machine has already been unusable for several minutes.
 PKGS_MEM=( earlyoom )
 
+# --- brightness -------------------------------------------------------------
+# The bar's per-monitor brightness control needs one tool per kind of screen,
+# because the two have nothing in common below the interface:
+#
+# brightnessctl - the internal panel. Writes /sys/class/backlight through
+#   logind, so no root and no setuid binary. Only panels wired to the GPU's
+#   backlight controller have such a device; on a laptop that is the built-in
+#   screen and nothing else.
+#
+# ddcutil - external monitors, which have no backlight device at all. Their
+#   panel controller is reached over the i2c bus behind the video cable, using
+#   DDC/CI. That is a real hardware protocol and the monitor may decline to
+#   speak it - some ship with it off in the OSD - which is why the bar module
+#   hides itself rather than assuming.
+#
+# See .config/i3/script/brightness.sh and do_brightness below.
+PKGS_BRIGHTNESS=( brightnessctl ddcutil )
+
 # --- AUR --------------------------------------------------------------------
 # Built with makepkg directly - see the AUR section below for why there is no
 # helper. jump-bin rather than jump: it ships a prebuilt binary, so this needs
@@ -295,6 +313,7 @@ PKG_GROUPS=(
     "fonts|${PKGS_FONTS[*]}"
     "theming|${PKGS_THEME[*]}"
     "memory|${PKGS_MEM[*]}"
+    "brightness|${PKGS_BRIGHTNESS[*]}"
     "AUR|${AUR_PKGS[*]}"
 )
 
@@ -1120,6 +1139,112 @@ EOF
         note "nouveau is still loaded from this boot - it goes on the next one"
     else
         ok "nouveau is not loaded"
+    fi
+
+    unset -f _write_root
+    return "$rc"
+}
+
+# What an external monitor needs before its brightness can be touched at all.
+#
+# The internal panel needs nothing set up here: brightnessctl goes through
+# logind, which already trusts the user owning the active session. An external
+# monitor is a different story, because there is no kernel backlight device for
+# it - the only way to its backlight is DDC/CI over the i2c bus behind the video
+# cable, and that bus is root-only by default.
+#
+# Two things have to be true, and neither survives a reboot on its own:
+#
+#   - the i2c-dev module must be loaded, or there are no /dev/i2c-* nodes to
+#     talk to. It is not autoloaded: nothing claims a modalias for it.
+#   - the user must be able to open those nodes. ddcutil ships a udev rule that
+#     handles this twice over - GROUP="i2c" on every bus, and TAG+="uaccess" on
+#     the ones belonging to a display controller, which is the one that grants
+#     access to whoever is logged in at the seat. The group is the belt to that
+#     rule's braces: uaccess is tied to an active local session, so a machine
+#     that is ever driven over ssh or from a display manager that does not set
+#     the seat up the same way still works.
+#
+# Nothing here is fatal. A machine with no DDC-capable monitor loses nothing -
+# the bar module checks whether an output can be dimmed and hides itself if not.
+do_brightness() {
+    step "brightness"
+
+    _write_root() {
+        local path="$1" content
+        content="$(cat)"
+        if [[ -f "$path" ]] && [[ "$(sudo cat "$path" 2>/dev/null)" == "$content" ]]; then
+            return 1
+        fi
+        sudo mkdir -p "$(dirname "$path")"
+        printf '%s\n' "$content" | sudo tee "$path" >/dev/null
+        return 0
+    }
+
+    local rc=0
+
+    if ! command -v ddcutil >/dev/null; then
+        note "ddcutil is not installed - external monitors will not be dimmable"
+        note "the internal panel still works; install the 'brightness' group for the rest"
+        unset -f _write_root
+        return 0
+    fi
+
+    # --- the i2c bus nodes --------------------------------------------------
+    if _write_root /etc/modules-load.d/i2c-dev.conf <<'EOF'
+# written by postinstall.sh
+# DDC/CI brightness control for external monitors. Without this there are no
+# /dev/i2c-* nodes and ddcutil has nothing to talk to - the module is not
+# autoloaded, because no device advertises a modalias for it.
+# See .config/i3/script/brightness.sh and docs/postinstall.md.
+i2c-dev
+EOF
+    then
+        ok "i2c-dev set to load at boot"
+    else
+        ok "i2c-dev already set to load at boot"
+    fi
+
+    if ! lsmod 2>/dev/null | grep -q '^i2c_dev'; then
+        if sudo modprobe i2c-dev 2>/dev/null; then
+            ok "i2c-dev loaded now, so this works without a reboot"
+        else
+            warn "could not load i2c-dev - external brightness will work after a reboot"
+        fi
+    fi
+
+    # --- access to them -----------------------------------------------------
+    #
+    # The group is created by ddcutil's own package, so this only ever adds a
+    # member. Membership is read at login: an already-open session does not
+    # gain it, which is worth saying out loud rather than leaving the user to
+    # wonder why nothing changed.
+    if getent group i2c >/dev/null; then
+        if id -nG "$USER" 2>/dev/null | tr ' ' '\n' | grep -qx i2c; then
+            ok "already in the i2c group"
+        elif sudo gpasswd -a "$USER" i2c >/dev/null 2>&1; then
+            ok "added $USER to the i2c group"
+            note "group membership is read at login, so log out and back in for it"
+        else
+            warn "could not add $USER to the i2c group"
+            rc=1
+        fi
+    else
+        note "no i2c group - relying on udev's uaccess tag alone, which is usually enough"
+    fi
+
+    # --- did any of it work? ------------------------------------------------
+    #
+    # The real test is not "is the module loaded" but "does a monitor answer",
+    # so ask one. A machine with only a laptop panel correctly reports none:
+    # eDP has an i2c bus for reading the EDID but does not speak DDC/CI.
+    local found
+    found="$(ddcutil detect --terse 2>/dev/null | grep -c '^Display ')"
+    if [[ "$found" =~ ^[0-9]+$ ]] && (( found > 0 )); then
+        ok "$found external monitor(s) answering on DDC/CI"
+    else
+        note "no external monitor is answering on DDC/CI"
+        note "normal with only a laptop panel; otherwise check DDC/CI in the monitor's OSD"
     fi
 
     unset -f _write_root
@@ -1974,6 +2099,7 @@ do_packages  || FAILURES=$((FAILURES + 1))
 do_services  || FAILURES=$((FAILURES + 1))
 do_power     || FAILURES=$((FAILURES + 1))
 do_gpu       || FAILURES=$((FAILURES + 1))
+do_brightness || FAILURES=$((FAILURES + 1))
 do_memory    || FAILURES=$((FAILURES + 1))
 do_dotfiles  || FAILURES=$((FAILURES + 1))
 do_notifications || FAILURES=$((FAILURES + 1))
