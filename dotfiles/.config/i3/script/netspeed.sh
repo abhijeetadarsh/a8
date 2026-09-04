@@ -53,8 +53,16 @@ INTERVAL="${NETSPEED_INTERVAL:-1}"
 
 # Font Awesome download/upload, U+F019 and U+F093 - the same two the network
 # modules used, and in the range that has survived every Nerd Font version.
-DOWN="${NETSPEED_DOWN_GLYPH:-}"
-UP="${NETSPEED_UP_GLYPH:-}"
+#
+# Written as \u escapes rather than pasted in literally. The literal characters
+# did not survive being written to this file the first time and the module went
+# out with two empty strings where the icons should be, which reads as nothing
+# more than odd spacing. These are plain ASCII in the file and bash builds the
+# glyph, so there is nothing to lose in transit.
+DOWN_DEFAULT=$'\uf019'
+UP_DEFAULT=$'\uf093'
+DOWN="${NETSPEED_DOWN_GLYPH:-$DOWN_DEFAULT}"
+UP="${NETSPEED_UP_GLYPH:-$UP_DEFAULT}"
 
 # Each rate is padded to this width so the bar does not jitter sideways every
 # time a reading gains or loses a digit. The old modules did it with polybar's

@@ -412,7 +412,15 @@ unblank() {
 # Nerd Font Propo - rather than assumed. If a font update moves them again,
 # BRIGHTNESS_GLYPHS replaces the whole ramp without editing this file, and any
 # number of levels works: the ramp is indexed by proportion, not by a fixed 7.
-IFS=' ' read -r -a GLYPHS <<< "${BRIGHTNESS_GLYPHS:-󰃛 󰃜 󰃝 󰃞 󰃟 󰃠 󰃡}"
+# Written as \u escapes, not pasted in literally: the netspeed module shipped
+# once with its two icons as empty strings because the literal characters did
+# not survive being written to the file, and an absent glyph reads as nothing
+# worse than odd spacing. ASCII in the file, glyph built by bash.
+# \U with eight digits, not \u with four: these live above U+FFFF and bash's
+# \u escape takes exactly four hex digits, so \uf00db is U+F00D followed by a
+# literal 'b'.
+GLYPHS_DEFAULT=$'\U000f00db \U000f00dc \U000f00dd \U000f00de \U000f00df \U000f00e0 \U000f00e1'
+IFS=' ' read -r -a GLYPHS <<< "${BRIGHTNESS_GLYPHS:-$GLYPHS_DEFAULT}"
 
 glyph_for() {
     local pct="$1" n="${#GLYPHS[@]}"
