@@ -6,6 +6,9 @@
 #   brightness.sh down    OUTPUT [STEP]  lower it
 #   brightness.sh set     OUTPUT PERCENT jump to an absolute level
 #   brightness.sh get     OUTPUT         print the level as a bare number
+#   brightness.sh off     OUTPUT         blank the backlight, remembering the level
+#   brightness.sh on      OUTPUT         bring it back to where it was
+#   brightness.sh toggle  OUTPUT         whichever of those two applies
 #   brightness.sh watch   OUTPUT         the bar's readout; never exits
 #   brightness.sh status  OUTPUT         that readout once, and exit
 #   brightness.sh supported OUTPUT       exit 0 if OUTPUT can be dimmed at all
@@ -111,6 +114,24 @@ die() { printf 'brightness: %s\n' "$1" >&2; exit 1; }
 
 ## the output -> backend map ##################################################
 
+# A signature of what is plugged in, cheap enough to sit on the scrolling path:
+# a handful of small sysfs reads and not one process spawned.
+#
+# It changes exactly when a connector's status does, which is the event that
+# makes a cached map wrong. i2c bus numbers are not stable across a replug - the
+# bus that was HDMI-1 can come back as a different number, or belong to a
+# different monitor - so a map kept from before one would quietly send
+# brightness to the wrong screen. That is the failure this exists to prevent.
+drm_signature() {
+    local f st sig=""
+    for f in /sys/class/drm/card*-*/status; do
+        [[ -r "$f" ]] || continue
+        read -r st < "$f" 2>/dev/null || continue
+        sig+="${f#/sys/class/drm/}=$st "
+    done
+    printf '%s' "$sig"
+}
+
 # xrandr and DRM do not agree on what a connector is called. The kernel calls
 # the external one card1-HDMI-A-1; xrandr, through the modesetting driver,
 # calls it HDMI-1 - the connector-type letter is dropped. Rather than encode
@@ -178,6 +199,7 @@ map_build() {
     fi
 
     mv -f "$MAP.tmp" "$MAP"
+    put "$MAP.sig" "$(drm_signature)"
 }
 
 # BACKEND and ARG for an output, rebuilding the map once if it is not in there
@@ -185,6 +207,19 @@ map_build() {
 BACKEND="" ARG=""
 map_lookup() {
     local out="$1" line tried=0
+
+    if [[ "$(drm_signature)" != "$(getf "$MAP.sig")" ]]; then
+        # What is plugged in has changed, so both halves of the cache are
+        # suspect: the bus a name maps to, and the level remembered against that
+        # name - which belonged to whatever monitor used to be there. Drop the
+        # levels too, so each output re-seeds from its own hardware rather than
+        # inheriting a stranger's. Only the DDC outputs keep a cached level; the
+        # internal panel is always read straight from sysfs.
+        map_build || return 1
+        rm -f "$STATE_DIR"/*.desired "$STATE_DIR"/*.applied
+        tried=1
+    fi
+
     while :; do
         if [[ -s "$MAP" ]]; then
             line="$(grep -P "^\Q$out\E\t" "$MAP" 2>/dev/null | head -1)"
@@ -322,19 +357,83 @@ level_set() {
 }
 
 
+## power saving ###############################################################
+
+# Blank the backlight, and remember where to come back to.
+#
+# Brightness 0 deliberately, and not DDC's power mode. VCP 0xD6 puts an external
+# monitor into real DPMS standby and would save more - the panel electronics go
+# down too, not just the backlight - but a monitor that is asleep has stopped
+# answering DDC, so the command to wake it cannot be delivered. Measured on the
+# MSI MAG 255F attached to this machine: `setvcp D6 4` succeeded, every DDC call
+# on that bus then failed, and `setvcp D6 1` could not get through. The screen
+# came back only when the video signal was re-asserted. A control with no
+# reliable way back is not a control, so this does not use it.
+#
+# Brightness 0 has no such trap. The panel stays awake and keeps answering, so
+# the way back is the same call that got here. On an LED-backlit screen the
+# backlight is the great majority of what the panel draws, so this is most of
+# the saving regardless.
+#
+# The floor that up/down respect is bypassed here on purpose. That floor exists
+# so a stray scroll cannot put a screen into darkness you then cannot see to
+# undo. This is not a stray scroll - it is the entire request - and it saves the
+# level first, so the way back is one more click on the same spot.
+blank() {
+    local out="$1" cur
+    cur="$(level_get "$out")"
+    [[ "$cur" =~ ^[0-9]+$ ]] || return 1
+    put "$(state "$out" saved)" "$cur"
+    level_set "$out" 0 || return 1
+    : > "$(state "$out" blanked)"
+}
+
+unblank() {
+    local out="$1" saved
+    saved="$(getf "$(state "$out" saved)")"
+    # 50 rather than nothing if the saved level is missing: coming back to a
+    # readable screen matters more than coming back to the exact one.
+    [[ "$saved" =~ ^[0-9]+$ ]] || saved=50
+    rm -f "$(state "$out" blanked)"
+    level_set "$out" "$saved"
+}
+
 ## the bar ####################################################################
 
-# Font Awesome's sun, U+F185. Deliberately one glyph for every level rather
-# than a ramp: the ramp codepoints live in the Material range that broke
-# elsewhere in this config when the Nerd Font was updated, and f185 has been
-# in every version of it. The percentage carries the level anyway.
-GLYPH="${BRIGHTNESS_GLYPH:-}"
+# The ramp, dimmest first: Material Design's brightness set, a sun that grows
+# rays as the level climbs. Same shape as the volume module's f026/f027/f028,
+# including the part where the dimmest glyph doubles as the off one - f026 is
+# both ramp-volume-0 and the muted icon.
+#
+# These are Nerd Fonts *v3* codepoints (U+F00DB-U+F00E1). The v2 Material range
+# is the one that moved and stopped rendering elsewhere in this config, which is
+# why every glyph here was checked against the bar's actual font - CaskaydiaCove
+# Nerd Font Propo - rather than assumed. If a font update moves them again,
+# BRIGHTNESS_GLYPHS replaces the whole ramp without editing this file, and any
+# number of levels works: the ramp is indexed by proportion, not by a fixed 7.
+IFS=' ' read -r -a GLYPHS <<< "${BRIGHTNESS_GLYPHS:-󰃛 󰃜 󰃝 󰃞 󰃟 󰃠 󰃡}"
+
+glyph_for() {
+    local pct="$1" n="${#GLYPHS[@]}"
+    (( n == 0 )) && return 0
+    (( pct < 0 )) && pct=0
+    (( pct > 100 )) && pct=100
+    printf '%s' "${GLYPHS[$(( pct * (n - 1) / 100 ))]}"
+}
 
 render() {
-    local v
-    v="$(level_get "$1")"
+    local out="$1" v
+    v="$(level_get "$out")"
     [[ "$v" =~ ^[0-9]+$ ]] || { printf '\n'; return; }
-    printf '%s %s%%\n' "$GLYPH" "$v"
+    # Blanked reads as a state, not as "0%" - the same reason the volume module
+    # says "Muted" rather than 0. The number would be true and useless: what you
+    # need to know is that the screen is off on purpose and a click brings it
+    # back.
+    if [[ -e "$(state "$out" blanked)" ]]; then
+        printf '%s off\n' "${GLYPHS[0]}"
+    else
+        printf '%s %s%%\n' "$(glyph_for "$v")" "$v"
+    fi
 }
 
 fifo_of() { state "$1" fifo; }
@@ -426,10 +525,15 @@ case "$ACTION" in
         esac
         new="$(clamp "$new" "$(level_min)")"
 
+        # Touching the level at all means the screen is wanted, so it stops
+        # being blanked - otherwise the bar would go on reporting "off" for a
+        # screen you had just scrolled back up.
+        rm -f "$(state "$OUT" blanked)"
+
         if [[ "$new" != "$cur" ]]; then
             level_set "$OUT" "$new" || die "could not set the brightness of $OUT"
-            poke "$OUT"
         fi
+        poke "$OUT"
 
         if (( WANT_NOTIFY )) && [[ -x "$NOTIFY" ]]; then
             # One tag for the output, so holding a key redraws one popup on the
@@ -438,6 +542,25 @@ case "$ACTION" in
             "$NOTIFY" -i display-brightness -t "brightness-$OUT" -p "$new" -T 1500 \
                 "$OUT" "Brightness ${new}%"
         fi
+        ;;
+
+    off|on|toggle|blank)
+        OUT="$(resolve_output "${2:-}")"
+        [[ -n "$OUT" ]] || die "no output given and none could be guessed"
+        map_lookup "$OUT" || die "$OUT has no controllable brightness (try: $0 list)"
+
+        case "$ACTION" in
+            off|blank) blank "$OUT"   || die "could not blank $OUT" ;;
+            on)        unblank "$OUT" || die "could not restore $OUT" ;;
+            toggle)
+                if [[ -e "$(state "$OUT" blanked)" ]]; then
+                    unblank "$OUT" || die "could not restore $OUT"
+                else
+                    blank "$OUT" || die "could not blank $OUT"
+                fi
+                ;;
+        esac
+        poke "$OUT"
         ;;
 
     get)
@@ -475,7 +598,7 @@ case "$ACTION" in
         ;;
 
     refresh)
-        rm -f "$MAP"
+        rm -f "$MAP" "$MAP.sig"
         map_build || die "could not rebuild the output map"
         cut -f1 "$MAP" | while read -r name; do poke "$name"; done
         ;;

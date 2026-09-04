@@ -339,7 +339,10 @@ you drag jumps back under the cursor.
 ## Brightness, per monitor
 
 Scroll the sun at the left of the bar's right-hand group. It moves the screen
-that bar is drawn on, in steps of 5%, and no other screen.
+that bar is drawn on, in steps of 5%, and no other screen. The icon ramps with
+the level - 󰃛 󰃜 󰃝 󰃞 󰃟 󰃠 󰃡 - the same way the volume module's does.
+Middle click blanks that screen and remembers the level; middle click again
+brings it back.
 
 That last part is the whole feature. There is no such thing as "the"
 brightness on a two-screen desktop, and the two screens are not even reached
@@ -368,6 +371,9 @@ brightness.sh list                 every output, its backend, its level
 brightness.sh up   HDMI-1          raise one screen by a step
 brightness.sh set  eDP-1 40        jump to a level
 brightness.sh get  eDP-1           the level, as a bare number
+brightness.sh off  HDMI-1          blank the backlight, remembering the level
+brightness.sh on   HDMI-1          bring it back
+brightness.sh toggle HDMI-1        whichever of those applies
 brightness.sh refresh              re-detect after plugging a monitor in
 ```
 
@@ -381,6 +387,32 @@ HDMI-1     ddc    /dev/i2c-3       25%
 
 An output missing from that table cannot be dimmed, and the bar will not show
 a control for it.
+
+### Nothing is pinned to a monitor
+
+No output name, backlight device, i2c bus or connector name appears anywhere in
+`brightness.sh`, the module, or `postinstall.sh`. All of it is discovered:
+
+- **which panel a backlight device drives** comes from its sysfs path.
+  `/sys/class/backlight/intel_backlight` resolves under
+  `.../card1/card1-eDP-1/`, so the connector is its parent directory - no
+  guessing, and no `card = intel_backlight` line to go stale on other hardware.
+- **which i2c bus a monitor is on** comes from `ddcutil detect`.
+- **the name xrandr uses for it** is reconciled against `xrandr --query`.
+  The kernel calls the external connector `card1-HDMI-A-1` and xrandr calls it
+  `HDMI-1` - the connector-type letter is dropped. Rather than encode that rule
+  and hope it holds for `DP-2` or `DVI-I-1`, both spellings are generated and
+  whichever one xrandr admits to having is kept.
+
+The cache that holds all that is invalidated by a signature of every DRM
+connector's `status` file. That matters more than it sounds: **i2c bus numbers
+are not stable across a replug.** The bus that was `HDMI-1` can come back as a
+different number, or belong to a different monitor, and a map kept from before
+would quietly send brightness to the wrong screen. The signature changes exactly
+when a connector's status does, and it is cheap enough to check on the scrolling
+path - a handful of small sysfs reads, no process spawned. When it changes, the
+remembered levels are dropped too, so each output re-seeds from its own hardware
+instead of inheriting whatever used to be plugged in there.
 
 ### Why a scroll does not wait for the monitor
 
@@ -411,6 +443,47 @@ blocks on a fifo and every change writes one byte into it, so the readout turns
 over in the same frame as the wheel. An interval would be worse in both
 directions - laggy on screen, and on a DDC monitor it would mean a 400ms i2c
 read every tick, forever, to re-learn a number we already know.
+
+### Turning a screen off to save power
+
+Middle click, or `brightness.sh off <output>`. The level is saved first, so
+middle click again - or any scroll - brings the screen back to where it was.
+
+This sets **brightness 0**, and deliberately not DDC's power mode. The choice
+is not obvious, so: VCP `0xD6` puts an external monitor into real DPMS standby
+and would save more, because the panel electronics go down too and not just the
+backlight. It is also unusable here. A monitor that is asleep has stopped
+answering DDC, which is the only channel we have to wake it. Measured on the
+MSI MAG 255F attached to this machine:
+
+```
+$ ddcutil --bus 3 setvcp D6 4      # standby - succeeds
+$ ddcutil --bus 3 getvcp D6        # DDC communication failed for monitor on bus /dev/i2c-3
+$ ddcutil --bus 3 setvcp D6 1      # wake - could not get through
+```
+
+The screen came back only when the video signal was re-asserted. A control with
+no reliable way back is not a control. Brightness 0 has no such trap: the panel
+stays awake and keeps answering, so the way back is the same call that got
+there - confirmed by reading brightness back as `0` while blanked.
+
+On an LED-backlit screen the backlight is the great majority of what the panel
+draws, so this is most of the saving anyway. **How much is not measured here.**
+The external monitor is mains powered and reports nothing, and this laptop's
+battery was full and on AC throughout, so `power_now` had nothing to say. Treat
+"saves power" as the physics of switching a backlight off, not as a number
+anyone measured on this machine.
+
+The floor that scrolling respects (5% on the internal panel) is bypassed by
+this action on purpose. That floor exists so a stray scroll cannot put a screen
+into darkness you then cannot see to undo; blanking is not a stray scroll, and
+it saves the level so the way back is one click.
+
+One caveat worth knowing before you middle click the laptop bar: the panel goes
+black, the bar goes with it, and the way back is a second middle click on a spot
+you can no longer see. It works - the module is still running and the click
+still lands - it is just blind. On the external monitor, where the laptop screen
+stays lit, none of that applies.
 
 ### The polybar trap this hit
 
