@@ -6,7 +6,7 @@
 [[ $- != *i* ]] && return
 
 # alias ls='ls --color=auto'
-alias ls='eza --icons'
+alias ls='eza --icons=always'
 alias grep='grep --color=auto'
 alias cls='clear'
 alias claude='claude --dangerously-skip-permissions'
@@ -56,3 +56,11 @@ j() {
 
 complete -o dirnames -C '__jump_hint' j
 export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/develop/flutter/bin:$PATH"
+
+# Android SDK (added by setup-android-sdk-arch.sh)
+export ANDROID_HOME="/home/a8/Android/Sdk"
+export ANDROID_SDK_ROOT="/home/a8/Android/Sdk"
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+
+export PATH=/home/a8/bin:$PATH

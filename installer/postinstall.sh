@@ -247,6 +247,47 @@ PKGS_THEME=(
     gnome-themes-extra
 )
 
+# --- surviving running out of memory ----------------------------------------
+#
+# On a 8GB laptop the machine does not die of a full disk or a bad driver, it
+# dies of a browser. And it does not die the way you would expect - the kernel
+# OOM killer is supposed to shoot the biggest process and leave you working,
+# but it only fires once reclaim has genuinely failed. Before that point the
+# kernel will spend minutes trying: scanning page lists, writing anonymous
+# pages out to swap, faulting them straight back in because they were still
+# in use. Every process, including the ones drawing your screen, blocks in
+# direct reclaim waiting for a page that is not coming.
+#
+# That is the hang. The box is not crashed - it is busy, at 100% of every
+# core, making just enough progress that the OOM killer never triggers. The
+# fan spins up, the pointer stops, and even Caps Lock stops toggling its LED,
+# because setting that LED is a work item on a queue that no longer gets
+# scheduled. There is nothing in the journal afterwards because nothing failed.
+#
+# earlyoom watches free memory and free swap from userspace, on a timer, and
+# kills something *before* the kernel reaches that state. Trading one browser
+# tab for the session is the entire point: the kernel's own killer is correct
+# but arrives after the machine has already been unusable for several minutes.
+PKGS_MEM=( earlyoom )
+
+# --- brightness -------------------------------------------------------------
+# The bar's per-monitor brightness control needs one tool per kind of screen,
+# because the two have nothing in common below the interface:
+#
+# brightnessctl - the internal panel. Writes /sys/class/backlight through
+#   logind, so no root and no setuid binary. Only panels wired to the GPU's
+#   backlight controller have such a device; on a laptop that is the built-in
+#   screen and nothing else.
+#
+# ddcutil - external monitors, which have no backlight device at all. Their
+#   panel controller is reached over the i2c bus behind the video cable, using
+#   DDC/CI. That is a real hardware protocol and the monitor may decline to
+#   speak it - some ship with it off in the OSD - which is why the bar module
+#   hides itself rather than assuming.
+#
+# See .config/i3/script/brightness.sh and do_brightness below.
+PKGS_BRIGHTNESS=( brightnessctl ddcutil )
+
 # --- AUR --------------------------------------------------------------------
 # Built with makepkg directly - see the AUR section below for why there is no
 # helper. jump-bin rather than jump: it ships a prebuilt binary, so this needs
@@ -271,6 +312,8 @@ PKG_GROUPS=(
     "drives|${PKGS_DRIVES[*]}"
     "fonts|${PKGS_FONTS[*]}"
     "theming|${PKGS_THEME[*]}"
+    "memory|${PKGS_MEM[*]}"
+    "brightness|${PKGS_BRIGHTNESS[*]}"
     "AUR|${AUR_PKGS[*]}"
 )
 
@@ -912,6 +955,426 @@ EOF
 
     unset -f _write_root
     return 0
+}
+
+# A discrete GPU that nothing renders on, and the freeze it caused.
+#
+# The bug this exists for looks identical to the memory livelock below - the
+# desktop dies, the journal ends mid-second, there is no OOM kill, no MCE, no
+# GPU reset and no panic - but it is a different fault, and the tell is that
+# memory was *fine* each time: 58-68% available with swap completely untouched
+# seconds before the machine went. Nothing was short of anything.
+#
+# The Caps Lock LED is what separates the two by hand, mid-hang: dead means
+# the kernel itself is starved and cannot run the work item that sets it, so
+# it is the livelock below; alive means the kernel is fine and the display
+# went out from under it, so it is this.
+#
+# What was left holding the display here: a GeForce MX330 on nouveau that
+# nothing used. The panel is wired to the Intel iGPU, the NVIDIA part is a
+# class 0302 "3D controller" - a GPU with no display outputs at all, which is
+# what Optimus means - and with no proprietary driver installed nothing could
+# offload to it either. All it did was runtime-suspend and resume under a
+# driver with no reclocking firmware ("pmu: firmware unavailable"), which is a
+# well-known hard lock on Pascal. Xorg had even auto-attached it as a
+# secondary GPU screen and mmap'd it, for no benefit whatsoever.
+#
+# So the fix is to ban the driver rather than tune it. On this class of
+# machine the card is dead weight, and the battery is better off without it.
+do_gpu() {
+    step "discrete GPU"
+
+    _write_root() {
+        local path="$1" content
+        content="$(cat)"
+        if [[ -f "$path" ]] && [[ "$(sudo cat "$path" 2>/dev/null)" == "$content" ]]; then
+            return 1
+        fi
+        sudo mkdir -p "$(dirname "$path")"
+        printf '%s\n' "$content" | sudo tee "$path" >/dev/null
+        return 0
+    }
+
+    # --- is this even the right machine? ------------------------------------
+    #
+    # Three guards, because this step disables a graphics driver and getting
+    # it wrong means a black screen on hardware I cannot see.
+    #
+    # Class 0302 is the load-bearing one. A "3D controller" has no display
+    # outputs wired to it, so nothing can be lost by refusing to load its
+    # driver. A class 0300 "VGA compatible controller" may well be driving the
+    # panel - on a desktop with a single NVIDIA card it certainly is - and
+    # blacklisting that leaves you staring at nothing.
+    local dgpu
+    dgpu="$(lspci -nn 2>/dev/null | grep -E '\[0302\]' | grep -i nvidia | head -1)"
+    if [[ -z "$dgpu" ]]; then
+        note "no Optimus NVIDIA GPU on this machine - nothing to ban"
+        unset -f _write_root
+        return 0
+    fi
+
+    # And something else has to be driving the screen.
+    if ! lspci -nn 2>/dev/null | grep -E '\[0300\]' | grep -qiE 'intel|amd|ati'; then
+        warn "NVIDIA 3D controller found, but no Intel/AMD display GPU beside it"
+        note "not touching the driver - that combination could be the display"
+        unset -f _write_root
+        return 0
+    fi
+
+    # If the proprietary driver is installed, the card is wanted. This step
+    # bans a card nothing uses; it does not overrule a deliberate choice.
+    if pacman -Qq 2>/dev/null | grep -qE '^nvidia(-open|-dkms|-open-dkms|-lts)?$'; then
+        note "the proprietary nvidia driver is installed, so the card is in use"
+        note "leaving it alone - remove that package first if you want it banned"
+        unset -f _write_root
+        return 0
+    fi
+
+    note "found ${dgpu#*: }"
+
+    local rc=0 initramfs=0
+
+    # --- stop the driver loading -------------------------------------------
+    #
+    # `blacklist` alone only stops autoload by modalias, which is most of the
+    # problem but not all of it: an explicit modprobe or a dependency pull
+    # still brings it in. `install ... /bin/false` closes that, so the module
+    # cannot load at all.
+    #
+    # This has to reach the initramfs to work. The `kms` hook pulls DRM
+    # drivers into the image and loads them before /etc is mounted, so the
+    # blacklist has to be in there with them - which is what mkinitcpio's
+    # `modconf` hook does by copying /etc/modprobe.d in.
+    if _write_root /etc/modprobe.d/blacklist-nouveau.conf <<'EOF'
+# written by postinstall.sh
+# Ban the Optimus discrete GPU. Nothing renders on it - the panel is on the
+# iGPU and no proprietary driver is installed - and nouveau's runtime
+# suspend/resume on Pascal hard-locks the machine with an empty journal.
+# See docs/postinstall.md.
+blacklist nouveau
+blacklist nouveaufb
+install nouveau /bin/false
+EOF
+    then
+        ok "wrote /etc/modprobe.d/blacklist-nouveau.conf"
+        initramfs=1
+    else
+        note "/etc/modprobe.d/blacklist-nouveau.conf already correct"
+    fi
+
+    # --- and keep the card powered off --------------------------------------
+    #
+    # This half is easy to miss and it inverts the result. With no driver
+    # bound the PCI core calls pm_runtime_forbid() on the device, so
+    # power/control defaults to "on" and the card sits awake and idle - which
+    # is *worse* for battery than leaving nouveau to suspend it. Setting it
+    # back to "auto" lets the PCI core drop the device and its parent PCIe
+    # port into D3cold, which is the state where the slot actually loses
+    # power.
+    #
+    # Verify with, a minute or so after boot (it is D0 until the port's
+    # autosuspend delay elapses - measuring too early looks like a failure):
+    #   cat /sys/bus/pci/devices/0000:01:00.0/power_state   # want D3cold
+    if _write_root /etc/udev/rules.d/60-nvidia-dgpu-powerdown.rules <<'EOF'
+# written by postinstall.sh
+# Let the PCI core power down the banned discrete GPU. Without this a
+# driverless device stays at "on" and burns power doing nothing.
+# class 0x030200 = 3D controller, vendor 0x10de = NVIDIA.
+ACTION=="add", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030200", ATTR{power/control}="auto"
+EOF
+    then
+        sudo udevadm control --reload >/dev/null 2>&1
+        sudo udevadm trigger --subsystem-match=pci --attr-match=vendor=0x10de >/dev/null 2>&1
+        ok "the card may now drop to D3cold instead of idling powered"
+    else
+        note "GPU power-down rule already in place"
+    fi
+
+    if ! grep -qE '^HOOKS=.*\bmodconf\b' /etc/mkinitcpio.conf 2>/dev/null; then
+        warn "mkinitcpio has no 'modconf' hook - /etc/modprobe.d is not in the initramfs"
+        note "add modconf to HOOKS in /etc/mkinitcpio.conf, or nouveau still loads at boot"
+        rc=1
+    elif (( initramfs )); then
+        note "rebuilding the initramfs so the blacklist applies at boot..."
+        if sudo mkinitcpio -P >/dev/null 2>&1; then
+            ok "initramfs rebuilt"
+        else
+            bad "mkinitcpio failed - run 'sudo mkinitcpio -P' and read the output"
+            rc=1
+        fi
+    fi
+
+    # --- belt and braces on the kernel command line -------------------------
+    #
+    # Not load-bearing: the modprobe.d file above already does the job once it
+    # is in the initramfs. This is the backstop for the case where it is not -
+    # a missing modconf hook, a hand-edited mkinitcpio.conf - because the
+    # kernel parses modprobe.blacklist= before any of that matters.
+    #
+    # Only GRUB is edited. archsetup.py also offers systemd-boot and rEFInd,
+    # and quietly rewriting whichever of those is installed is more ways to
+    # break somebody's boot than this backstop is worth.
+    if [[ -f /etc/default/grub ]] && command -v grub-mkconfig >/dev/null 2>&1; then
+        if grep -q 'modprobe\.blacklist=nouveau' /etc/default/grub; then
+            note "kernel command line already carries the blacklist"
+        elif grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT="[^"]*"' /etc/default/grub; then
+            sudo sed -i 's/^\(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*\)"/\1 modprobe.blacklist=nouveau"/' \
+                /etc/default/grub
+            if sudo grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1; then
+                ok "kernel command line carries the blacklist too"
+            else
+                bad "grub-mkconfig failed - check /etc/default/grub and run it by hand"
+                rc=1
+            fi
+        else
+            note "GRUB_CMDLINE_LINUX_DEFAULT is not in the expected form - left alone"
+        fi
+    else
+        note "not GRUB, so no command-line backstop was added"
+        note "optional: add modprobe.blacklist=nouveau to your bootloader's parameters"
+    fi
+
+    # --- say what is actually true right now --------------------------------
+    if lsmod 2>/dev/null | grep -q '^nouveau'; then
+        note "nouveau is still loaded from this boot - it goes on the next one"
+    else
+        ok "nouveau is not loaded"
+    fi
+
+    unset -f _write_root
+    return "$rc"
+}
+
+# What an external monitor needs before its brightness can be touched at all.
+#
+# The internal panel needs nothing set up here: brightnessctl goes through
+# logind, which already trusts the user owning the active session. An external
+# monitor is a different story, because there is no kernel backlight device for
+# it - the only way to its backlight is DDC/CI over the i2c bus behind the video
+# cable, and that bus is root-only by default.
+#
+# Two things have to be true, and neither survives a reboot on its own:
+#
+#   - the i2c-dev module must be loaded, or there are no /dev/i2c-* nodes to
+#     talk to. It is not autoloaded: nothing claims a modalias for it.
+#   - the user must be able to open those nodes. ddcutil ships a udev rule that
+#     handles this twice over - GROUP="i2c" on every bus, and TAG+="uaccess" on
+#     the ones belonging to a display controller, which is the one that grants
+#     access to whoever is logged in at the seat. The group is the belt to that
+#     rule's braces: uaccess is tied to an active local session, so a machine
+#     that is ever driven over ssh or from a display manager that does not set
+#     the seat up the same way still works.
+#
+# Nothing here is fatal. A machine with no DDC-capable monitor loses nothing -
+# the bar module checks whether an output can be dimmed and hides itself if not.
+do_brightness() {
+    step "brightness"
+
+    _write_root() {
+        local path="$1" content
+        content="$(cat)"
+        if [[ -f "$path" ]] && [[ "$(sudo cat "$path" 2>/dev/null)" == "$content" ]]; then
+            return 1
+        fi
+        sudo mkdir -p "$(dirname "$path")"
+        printf '%s\n' "$content" | sudo tee "$path" >/dev/null
+        return 0
+    }
+
+    local rc=0
+
+    if ! command -v ddcutil >/dev/null; then
+        note "ddcutil is not installed - external monitors will not be dimmable"
+        note "the internal panel still works; install the 'brightness' group for the rest"
+        unset -f _write_root
+        return 0
+    fi
+
+    # --- the i2c bus nodes --------------------------------------------------
+    if _write_root /etc/modules-load.d/i2c-dev.conf <<'EOF'
+# written by postinstall.sh
+# DDC/CI brightness control for external monitors. Without this there are no
+# /dev/i2c-* nodes and ddcutil has nothing to talk to - the module is not
+# autoloaded, because no device advertises a modalias for it.
+# See .config/i3/script/brightness.sh and docs/postinstall.md.
+i2c-dev
+EOF
+    then
+        ok "i2c-dev set to load at boot"
+    else
+        ok "i2c-dev already set to load at boot"
+    fi
+
+    if ! lsmod 2>/dev/null | grep -q '^i2c_dev'; then
+        if sudo modprobe i2c-dev 2>/dev/null; then
+            ok "i2c-dev loaded now, so this works without a reboot"
+        else
+            warn "could not load i2c-dev - external brightness will work after a reboot"
+        fi
+    fi
+
+    # --- access to them -----------------------------------------------------
+    #
+    # The group is created by ddcutil's own package, so this only ever adds a
+    # member. Membership is read at login: an already-open session does not
+    # gain it, which is worth saying out loud rather than leaving the user to
+    # wonder why nothing changed.
+    if getent group i2c >/dev/null; then
+        if id -nG "$USER" 2>/dev/null | tr ' ' '\n' | grep -qx i2c; then
+            ok "already in the i2c group"
+        elif sudo gpasswd -a "$USER" i2c >/dev/null 2>&1; then
+            ok "added $USER to the i2c group"
+            note "group membership is read at login, so log out and back in for it"
+        else
+            warn "could not add $USER to the i2c group"
+            rc=1
+        fi
+    else
+        note "no i2c group - relying on udev's uaccess tag alone, which is usually enough"
+    fi
+
+    # --- did any of it work? ------------------------------------------------
+    #
+    # The real test is not "is the module loaded" but "does a monitor answer",
+    # so ask one. A machine with only a laptop panel correctly reports none:
+    # eDP has an i2c bus for reading the EDID but does not speak DDC/CI.
+    local found
+    found="$(ddcutil detect --terse 2>/dev/null | grep -c '^Display ')"
+    if [[ "$found" =~ ^[0-9]+$ ]] && (( found > 0 )); then
+        ok "$found external monitor(s) answering on DDC/CI"
+    else
+        note "no external monitor is answering on DDC/CI"
+        note "normal with only a laptop panel; otherwise check DDC/CI in the monitor's OSD"
+    fi
+
+    unset -f _write_root
+    return "$rc"
+}
+
+# What to do when memory runs out, so that it is a dead tab and not a dead
+# machine.
+#
+# The bug this exists for: the desktop froze completely - pointer dead, Caps
+# Lock LED dead, fan at full - with nothing in the journal. Nothing in the
+# journal is the diagnosis, not a gap in it: no OOM kill, no panic, no GPU
+# reset, no MCE, no I/O error. The log simply stops mid-second while the
+# kernel is still running. That is memory-pressure livelock, and the reason
+# the kernel's own OOM killer did not save the session is that reclaim never
+# quite failed hard enough to summon it.
+#
+# See the PKGS_MEM comment above for the long version. This step is the two
+# settings that follow from it.
+do_memory() {
+    step "memory pressure"
+
+    _write_root() {
+        local path="$1" content
+        content="$(cat)"
+        if [[ -f "$path" ]] && [[ "$(sudo cat "$path" 2>/dev/null)" == "$content" ]]; then
+            return 1
+        fi
+        sudo mkdir -p "$(dirname "$path")"
+        printf '%s\n' "$content" | sudo tee "$path" >/dev/null
+        return 0
+    }
+
+    local rc=0
+
+    # --- reclaim earlier, so it is never desperate --------------------------
+    #
+    # watermark_scale_factor is how much headroom kswapd keeps, in tenths of a
+    # percent of a zone. The default 10 means 1%: on 8GB, kswapd wakes with
+    # about 80MB left and stops as soon as it claws back a little. A browser
+    # allocating faster than that empties the gap between wakeups, and then
+    # allocation happens in *direct* reclaim - on the allocating thread, which
+    # is to say the thread that was drawing your window. 125 gives kswapd an
+    # order of magnitude more room to work in ahead of that, in the background,
+    # where a stall costs nothing visible.
+    #
+    # watermark_boost_factor is a separate mechanism aimed at keeping large
+    # contiguous pages available: on fragmentation it temporarily boosts the
+    # watermarks and reclaims hard to defragment. On a desktop that is mostly
+    # anonymous memory it fires during exactly the moments that are already
+    # tight and turns them into swap storms. 0 turns it off; huge pages are
+    # not what this machine is short of.
+    #
+    # Neither of these caps memory use. They only change when reclaim starts,
+    # which is the difference between it running ahead of the workload and it
+    # running underneath it.
+    if _write_root /etc/sysctl.d/99-memory-pressure.conf <<'EOF'
+# written by postinstall.sh
+# Start reclaiming sooner and in the background, so allocations do not end up
+# in direct reclaim on the thread that was drawing the screen. See
+# docs/postinstall.md.
+vm.watermark_scale_factor = 125
+vm.watermark_boost_factor = 0
+EOF
+    then
+        sudo sysctl --system >/dev/null 2>&1
+        ok "kswapd now reclaims with 12.5% headroom instead of 1%"
+    else
+        note "memory watermarks already tuned"
+    fi
+
+    # --- and a killer that arrives on time ----------------------------------
+    if ! command -v earlyoom >/dev/null; then
+        warn "earlyoom is not installed - the freeze this step exists for can still happen"
+        note "install it with the 'memory' group: ./postinstall.sh --repair"
+        unset -f _write_root
+        return 1
+    fi
+
+    # ExecStart is overridden rather than configured through
+    # /etc/default/earlyoom because the packaging decides whether that file is
+    # read at all, and a setting that silently does nothing is worse here than
+    # one written in full. The empty ExecStart= is required: without it systemd
+    # appends to the unit's command instead of replacing it.
+    #
+    # -m 10,5 / -s 10,5: warn in the journal at 10% free, kill at 5%, and only
+    # when memory *and* swap are both that low - which on this machine means
+    # zswap and the swap partition are also exhausted, i.e. the real thing and
+    # not a moment of cache pressure.
+    #
+    # --prefer is what makes the trade acceptable. Left alone, earlyoom picks
+    # the largest resident process, and the largest process during a Chromium
+    # session is often Xorg holding the framebuffers - killing it takes the
+    # whole desktop and every unsaved window with it. These names are the
+    # comms that actually appear in this machine's past OOM kills (comm is
+    # truncated to 15 characters, which is why it is `Isolated Web Co`).
+    #
+    # --avoid is the other half: never the session, never the compositor,
+    # never the terminal you would use to fix it.
+    #
+    # -r 60 prints a memory report to the journal every minute. That is the
+    # part that pays for itself the next time something does get through: the
+    # last line before a hard poweroff says how much was left, so the failure
+    # stops being invisible. It pairs with the 30s journal sync above.
+    if _write_root /etc/systemd/system/earlyoom.service.d/10-thresholds.conf <<'EOF'
+# written by postinstall.sh
+# Kill one memory hog before the kernel livelocks, and never kill the session.
+# See docs/postinstall.md.
+[Service]
+ExecStart=
+ExecStart=/usr/bin/earlyoom -m 10,5 -s 10,5 -r 60 \
+    --prefer '^(Isolated Web Co|Web Content|chrome|chromium|firefox|electron|java|node|code-oss|code)$' \
+    --avoid '^(Xorg|i3|kitty|polybar|dunst|picom|lightdm|systemd|systemd-.*|dbus-.*|pipewire|pipewire-pulse|wireplumber|NetworkManager|sshd|sudo|bash)$'
+EOF
+    then
+        sudo systemctl daemon-reload >/dev/null 2>&1
+    else
+        note "earlyoom thresholds already set"
+    fi
+
+    if sudo systemctl enable --now earlyoom.service >/dev/null 2>&1; then
+        ok "earlyoom running - a hog dies at 5% free instead of the machine hanging"
+    else
+        bad "could not enable earlyoom.service"
+        note "check it with: systemctl status earlyoom"
+        rc=1
+    fi
+
+    unset -f _write_root
+    return "$rc"
 }
 
 # The i3 config is the one dotfile whose mistakes wait for a keypress.
@@ -1635,6 +2098,9 @@ do_update
 do_packages  || FAILURES=$((FAILURES + 1))
 do_services  || FAILURES=$((FAILURES + 1))
 do_power     || FAILURES=$((FAILURES + 1))
+do_gpu       || FAILURES=$((FAILURES + 1))
+do_brightness || FAILURES=$((FAILURES + 1))
+do_memory    || FAILURES=$((FAILURES + 1))
 do_dotfiles  || FAILURES=$((FAILURES + 1))
 do_notifications || FAILURES=$((FAILURES + 1))
 # After dotfiles: it runs the camera.sh that step links into place.

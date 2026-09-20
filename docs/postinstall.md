@@ -22,61 +22,81 @@ Re-running it is the supported way to fix a half-finished install.
 
 1. **`pacman -Syu`** - refresh and update.
 2. **Packages** - the X server, pipewire, i3, polybar, rofi, picom, kitty,
-   ranger, neovim, fonts, and the Python stack the theme engine needs. The
-   list is grouped by purpose at the top of the script; that is the one place
-   to edit when you want to add something. `speech-dispatcher` and `espeak-ng`
+   ranger, neovim, fonts, and the Python stack the theme engine needs. The list
+   is grouped by purpose at the top of the script; that is the one place to
+   edit when you want to add something. `speech-dispatcher` and `espeak-ng`
    ride along with Firefox - they are what its "Listen" control and any site
    using the Web Speech API talk to, and without both there is no voice and no
    error to explain it. `mpv` is the video player, configured in
    [`dotfiles/.config/mpv/mpv.conf`](../dotfiles/.config/mpv/mpv.conf), and the
-   `drives` group is what makes external disks mount themselves (see
-   [Removable drives](#removable-drives)).
-3. **AUR** - builds `jump-bin` and `i3lock-color` with makepkg directly; no
-   AUR helper is installed (see below).
+   `drives` group is what makes external disks mount themselves (see [Removable
+   drives](#removable-drives)).
+3. **AUR** - builds `jump-bin` and `i3lock-color` with makepkg directly; no AUR
+   helper is installed (see below).
 4. **Services** - NetworkManager, bluetooth, and the pipewire user services.
-5. **Display power** - three root-owned files: `i915 enable_psr=0` (see
-   [Black screen at idle](#black-screen-at-idle) below), full SysRq so a wedged
+5. **Display power** - three root-owned files: `i915 enable_psr=0` (see [Black
+   screen at idle](#black-screen-at-idle) below), full SysRq so a wedged
    session can still be shut down cleanly, and a 30s journal sync so a forced
    poweroff stops eating the logs that explain it. Rebuilds the initramfs only
    when the module option actually changed.
-6. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
+6. **Discrete GPU** - on an Optimus laptop, bans the NVIDIA card outright:
+   blacklists `nouveau` and adds a udev rule that lets the card power all the
+   way down. Nothing renders on it, and the driver was hard-locking the machine
+   (see [Freeze with memory to spare](#freeze-with-memory-to-spare)). Guarded
+   three ways - it only fires on a class `0302` "3D controller" with an
+   Intel/AMD display GPU beside it and no proprietary `nvidia` package
+   installed - so it does nothing on a desktop, on AMD, or on a machine where
+   you actually use the card.
+7. **Brightness** - installs `brightnessctl` and `ddcutil`, sets `i2c-dev` to
+   load at boot and puts you in the `i2c` group, which is what an external
+   monitor needs before its backlight can be reached at all. The internal panel
+   needs none of it. Nothing here is fatal: a machine with no DDC-capable
+   monitor just loses the external half, and the bar module hides itself on any
+   output it cannot dim. See [Brightness, per
+   monitor](#brightness-per-monitor).
+8. **Memory pressure** - installs and configures `earlyoom`, plus two `vm.*`
+   sysctls that make the kernel start reclaiming earlier. This is the step that
+   stops the machine hanging outright when it runs out of RAM; see [Total
+   freeze under memory pressure](#total-freeze-under-memory-pressure). Like the
+   step above it writes root-owned files and is silent on a re-run that would
+   not change them.
+9. **Dotfiles** - `stow`s [`../dotfiles`](../dotfiles) into `$HOME`. Anything
    real already sitting at a target path is moved to
    `~/.dotfiles-backup-<timestamp>/` first, so nothing is silently destroyed.
-   Then it checks the two configs it just linked whose mistakes are silent.
-   For i3: `i3 -C` for the directives, plus a scan of the bindings for the one
-   mistake `i3 -C` cannot see (see
-   [A binding that needs shell logic needs a script](#a-binding-that-needs-shell-logic-needs-a-script)).
-   For polybar: every module named in a `modules-*` line has a `[module/…]`
-   section somewhere, and every `*.sh` the bar calls exists and is executable.
-   polybar has no dry run - `polybar --dump=<key>` looks like one but never
-   builds the bar, so it exits 0 on a config naming a module that does not
-   exist - and `launch.sh` starts it with `-q`, so both faults otherwise show
-   up as an icon that is missing or a button that does nothing.
-7. **Notifications** - creates `~/Pictures/maim` and checks the chain the
+   Then it checks the two configs it just linked whose mistakes are silent. For
+   i3: `i3 -C` for the directives, plus a scan of the bindings for the one
+   mistake `i3 -C` cannot see (see [A binding that needs shell logic needs a
+   script](#a-binding-that-needs-shell-logic-needs-a-script)). For polybar:
+   every module named in a `modules-*` line has a `[module/…]` section
+   somewhere, and every `*.sh` the bar calls exists and is executable. polybar
+   has no dry run - `polybar --dump=<key>` looks like one but never builds the
+   bar, so it exits 0 on a config naming a module that does not exist - and
+   `launch.sh` starts it with `-q`, so both faults otherwise show up as an icon
+   that is missing or a button that does nothing.
+10. **Notifications** - creates `~/Pictures/maim` and checks the chain the
    keybindings report through: `notify-send`, dunst, and the scripts under
    `.config/i3/script/`. Nothing to install or enable - dunst is D-Bus
    activated - but every way this breaks is silent, so it is checked rather
    than assumed. Re-run it from inside the desktop and it sends a real test
    notification. See [Notifications](#notifications).
-8. **Camera** - checks, rather than installs. There is no webcam driver to
-   install: `uvcvideo` is in the kernel and autoloads. What this reports is
-   the three things that do go wrong - no capture device, a device you cannot
-   open, or the userspace to configure it missing - because all three present
-   as the same nothing. See [The webcam](#the-webcam).
-9. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
-   ways into it. See below; a file either of them wrote is rewritten on a
-   re-run, one you wrote yourself is left alone.
-10. **Login screen** - LightDM plus the GTK greeter, configured and enabled, the
-    directory the greeter reads its theme from, and a `display-setup-script` so
-    the greeter arranges the monitors before it draws (see
-    [The greeter's monitor layout](#the-greeters-monitor-layout)).
-11. **Palette** - generates the desktop colour scheme from a wallpaper, so the
-    first login lands on a themed desktop rather than an i3 config error.
-    i3's other generated include, `monitors.conf`, gets an empty placeholder
-    for the same reason: the script cannot work out the real monitor layout
-    without a running X server, and `monitors.sh` rewrites it at every i3 start
-    anyway.
-12. **neovim plugins** - installs and pins them from
+11. **Camera** - checks, rather than installs. There is no webcam driver to
+   install: `uvcvideo` is in the kernel and autoloads. What this reports is the
+   three things that do go wrong - no capture device, a device you cannot open,
+   or the userspace to configure it missing - because all three present as the
+   same nothing. See [The webcam](#the-webcam).
+12. **`~/.xprofile` and `~/.xinitrc`** - the session environment and the two
+    ways into it. See below; a file either of them wrote is rewritten on a
+    re-run, one you wrote yourself is left alone.
+13. **Login screen** - LightDM plus the GTK greeter, configured and enabled,
+    the directory the greeter reads its theme from, and a
+    `display-setup-script` so the greeter arranges the monitors before it draws
+    (see [The greeter's monitor layout](#the-greeters-monitor-layout)).
+14. **Palette** - generates the desktop colour scheme from a wallpaper, so the
+    first login lands on a themed desktop rather than an i3 config error. i3's
+    other generated include, `monitors.conf`, gets an empty placeholder for the
+    same reason: the script cannot work out the real monitor layout without a
+    running X server, and `monitors.sh` rewrites it at every i3 start anyway.
+15. **neovim plugins** - installs and pins them from
     [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
     deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
     built by this script rather than by whenever you first happen to open nvim.
@@ -271,8 +291,10 @@ the bar's camera button useful there anyway.
 ## Camera, microphone and speakers, from the bar
 
 The right-hand end of the bar is the hardware you are about to be seen and
-heard through, in the order a call asks for it. Each opens its own settings
-app, and each click goes through
+heard through, in the order a call asks for it, with the screen's own control
+at the head of it (see [Brightness, per monitor](#brightness-per-monitor);
+that one is scrolled, not clicked). Each of the three below opens its own
+settings app, and each click goes through
 [`app.sh`](../dotfiles/.config/i3/script/app.sh), which raises the window if
 it is already open rather than starting a second one.
 
@@ -313,6 +335,204 @@ on a window that is *already* open, since `--tab` is read at startup and
 `app.sh` raises rather than relaunches. That trade is deliberate: two mixers
 fighting over one sink show each other's changes a moment late, so a slider
 you drag jumps back under the cursor.
+
+## Brightness, per monitor
+
+Scroll the sun at the left of the bar's right-hand group. It moves the screen
+that bar is drawn on, in steps of 5%, and no other screen. The icon ramps with
+the level - 󰃛 󰃜 󰃝 󰃞 󰃟 󰃠 󰃡 - the same way the volume module's does.
+Middle click blanks that screen and remembers the level; middle click again
+brings it back.
+
+That last part is the whole feature. There is no such thing as "the"
+brightness on a two-screen desktop, and the two screens are not even reached
+the same way:
+
+| | internal panel | external monitor |
+| --- | --- | --- |
+| where the control lives | `/sys/class/backlight` | the monitor's own controller |
+| how it is reached | `brightnessctl`, via logind | `ddcutil`, DDC/CI over i2c |
+| a write costs | ~3ms | ~240ms |
+| a read costs | ~3ms | ~400ms |
+| can it fail | no | yes - DDC/CI is optional and can be off in the OSD |
+
+An external monitor has no backlight device at all. `/sys/class/backlight` only
+ever lists panels wired to the GPU's own backlight controller, which on a
+laptop means the built-in screen; everything else has to be asked over the i2c
+bus behind the video cable, in a protocol the monitor is free not to speak.
+That is what [step 7](#what-it-does-in-order) sets up, and why it can honestly
+report having found nothing.
+
+Both live behind
+[`brightness.sh`](../dotfiles/.config/i3/script/brightness.sh):
+
+```
+brightness.sh list                 every output, its backend, its level
+brightness.sh up   HDMI-1          raise one screen by a step
+brightness.sh set  eDP-1 40        jump to a level
+brightness.sh get  eDP-1           the level, as a bare number
+brightness.sh off  HDMI-1          blank the backlight, remembering the level
+brightness.sh on   HDMI-1          bring it back
+brightness.sh toggle HDMI-1        whichever of those applies
+brightness.sh refresh              re-detect after plugging a monitor in
+```
+
+`list` is the one to run when something looks wrong:
+
+```
+$ brightness.sh list
+eDP-1      sysfs  intel_backlight  81%
+HDMI-1     ddc    /dev/i2c-3       25%
+```
+
+An output missing from that table cannot be dimmed, and the bar will not show
+a control for it.
+
+### Nothing is pinned to a monitor
+
+No output name, backlight device, i2c bus or connector name appears anywhere in
+`brightness.sh`, the module, or `postinstall.sh`. All of it is discovered:
+
+- **which panel a backlight device drives** comes from its sysfs path.
+  `/sys/class/backlight/intel_backlight` resolves under
+  `.../card1/card1-eDP-1/`, so the connector is its parent directory - no
+  guessing, and no `card = intel_backlight` line to go stale on other hardware.
+- **which i2c bus a monitor is on** comes from `ddcutil detect`.
+- **the name xrandr uses for it** is reconciled against `xrandr --query`.
+  The kernel calls the external connector `card1-HDMI-A-1` and xrandr calls it
+  `HDMI-1` - the connector-type letter is dropped. Rather than encode that rule
+  and hope it holds for `DP-2` or `DVI-I-1`, both spellings are generated and
+  whichever one xrandr admits to having is kept.
+
+The cache that holds all that is invalidated by a signature of every DRM
+connector's `status` file. That matters more than it sounds: **i2c bus numbers
+are not stable across a replug.** The bus that was `HDMI-1` can come back as a
+different number, or belong to a different monitor, and a map kept from before
+would quietly send brightness to the wrong screen. The signature changes exactly
+when a connector's status does, and it is cheap enough to check on the scrolling
+path - a handful of small sysfs reads, no process spawned. When it changes, the
+remembered levels are dropped too, so each output re-seeds from its own hardware
+instead of inheriting whatever used to be plugged in there.
+
+### Why a scroll does not wait for the monitor
+
+A wheel flick is a dozen events in under a second. Sending a dozen 240ms DDC
+writes would still be draining the queue seconds after you stopped, and the
+panel would visibly stair-step through every value on the way. So nothing on
+the scrolling path talks to the monitor at all. A scroll moves a number in a
+file - about 12ms, most of it process startup - and a single background applier
+writes whatever those events added up to, once. Measured, a burst of twelve
+scroll events produces **two** DDC writes and lands on the right value.
+
+The applier holds a lock for its whole life, `ddcutil` calls included, because
+two DDC transactions interleaved on one i2c line do not queue politely - they
+corrupt each other and the monitor ends up somewhere neither side asked for.
+Anything scrolled while an applier is running is picked up by its loop;
+anything scrolled in the instant one is exiting spawns another, which waits for
+the lock and sees the discrepancy for itself.
+
+The level on screen is therefore the value we last *asked* for, not one read
+back from the monitor. That is deliberate: reading it back costs 400ms, the
+number would arrive long after the wheel had moved on, and every change goes
+through this script anyway.
+
+### Why the module is pushed to, not polled
+
+`[module/brightness]` is `tail = true` with no interval. `brightness.sh watch`
+blocks on a fifo and every change writes one byte into it, so the readout turns
+over in the same frame as the wheel. An interval would be worse in both
+directions - laggy on screen, and on a DDC monitor it would mean a 400ms i2c
+read every tick, forever, to re-learn a number we already know.
+
+### Turning a screen off to save power
+
+Middle click, or `brightness.sh off <output>`. The level is saved first, so
+middle click again - or any scroll - brings the screen back to where it was.
+
+This sets **brightness 0**, and deliberately not DDC's power mode. The choice
+is not obvious, so: VCP `0xD6` puts an external monitor into real DPMS standby
+and would save more, because the panel electronics go down too and not just the
+backlight. It is also unusable here. A monitor that is asleep has stopped
+answering DDC, which is the only channel we have to wake it. Measured on the
+MSI MAG 255F attached to this machine:
+
+```
+$ ddcutil --bus 3 setvcp D6 4      # standby - succeeds
+$ ddcutil --bus 3 getvcp D6        # DDC communication failed for monitor on bus /dev/i2c-3
+$ ddcutil --bus 3 setvcp D6 1      # wake - could not get through
+```
+
+The screen came back only when the video signal was re-asserted. A control with
+no reliable way back is not a control. Brightness 0 has no such trap: the panel
+stays awake and keeps answering, so the way back is the same call that got
+there - confirmed by reading brightness back as `0` while blanked.
+
+On an LED-backlit screen the backlight is the great majority of what the panel
+draws, so this is most of the saving anyway. **How much is not measured here.**
+The external monitor is mains powered and reports nothing, and this laptop's
+battery was full and on AC throughout, so `power_now` had nothing to say. Treat
+"saves power" as the physics of switching a backlight off, not as a number
+anyone measured on this machine.
+
+The floor that scrolling respects (5% on the internal panel) is bypassed by
+this action on purpose. That floor exists so a stray scroll cannot put a screen
+into darkness you then cannot see to undo; blanking is not a stray scroll, and
+it saves the level so the way back is one click.
+
+### Getting a blanked screen back
+
+Three ways, and the pointer is the worst of them:
+
+| | what it does |
+| --- | --- |
+| `Super+Shift+b` | brings **every** blanked screen back. No target, no aim. |
+| `XF86MonBrightness` up/down | any level change un-blanks, so the brightness keys wake the focused monitor as a side effect of doing the obvious thing |
+| `Super+b` | toggles the focused monitor - the keyboard twin of the middle click |
+| middle click | works, but you are aiming at a module on a black screen |
+
+The middle click is kept because it is the natural thing to reach for when only
+the *other* monitor is dark. It is a poor way back when the screen you blanked
+is the one you are looking at: the panel is black, the bar is black, and you are
+clicking at a remembered position. The module does pad itself out when blanked,
+so the target along the top edge is much wider than the usual `󰃟 81%` - but a
+wider invisible target is still an invisible target.
+
+**`Super+Shift+b` is the one to remember.** It needs no focus, no pointer and no
+knowledge of which screen went dark, it restores each screen to the level it
+had, and it does nothing at all when nothing is blanked - so it is safe to hit
+whenever you are unsure. Keybindings take no `$MONITOR`, so `brightness.sh` asks
+i3 which output is focused for the two that need a target; `wake` needs none.
+
+Those keys were dead before this: nothing was bound to
+`XF86MonBrightnessUp`/`Down` at all.
+
+### The polybar trap this hit
+
+**polybar 3.7 does not expand `${env:...}` inside a module's `exec`, `exec-if`
+or scroll values.** It *does* expand it in bar keys, which is what makes this a
+quiet failure rather than an obvious one: `monitor = ${env:MONITOR:}` in
+`config.ini` works, so the bars land on the right screens, while
+
+```ini
+exec = ~/.config/i3/script/brightness.sh watch ${env:MONITOR:}
+```
+
+runs with the argument silently dropped - and every bar drives the primary
+panel. Confirmed against 3.7.2 with a minimal config: the module's script
+received `argc=1`, the monitor name gone. This is the same class of gap the
+`[bar/main-tray]` comment describes for module lists.
+
+`brightness.sh` reads `$MONITOR` out of its own environment instead. `launch.sh`
+starts one polybar per output with it set, and the module is a child of that
+process, so the value is simply already there with no substitution to go wrong.
+
+### The hardware keys
+
+`XF86MonBrightnessUp` / `Down` are not bound to anything. The script is ready
+for them - `brightness.sh up --notify` raises the screen the pointer is on and
+draws the same tagged dunst popup the volume keys use - but which screen a
+*key* should move is a genuinely different question from which one a scroll
+should, and it has not been answered here yet.
 
 ## What the keys do
 
@@ -565,9 +785,11 @@ only way out is holding the power button.
 **Cause on this hardware:** Panel Self Refresh. The Ice Lake display controller
 hands the panel off to refresh itself, and coming back out of that fails - the
 kernel keeps running, it just never gets a picture again. The tell is that the
-machine is *alive*: it answers SSH, Caps Lock still toggles its LED. A dead
-kernel is a different bug (on this laptop, suspect nouveau's runtime power
-management on the unused MX330 dGPU).
+machine is *alive*: it answers SSH, Caps Lock still toggles its LED. A freeze
+where Caps Lock is dead too is a different bug - see
+[Total freeze under memory pressure](#total-freeze-under-memory-pressure). One
+where Caps Lock still works but the screen went *mid-use* rather than at idle
+is a third - see [Freeze with memory to spare](#freeze-with-memory-to-spare).
 
 **Fix:** `postinstall.sh` writes `options i915 enable_psr=0` to
 `/etc/modprobe.d/i915-psr.conf` and rebuilds the initramfs. That last part is
@@ -603,6 +825,213 @@ previous boot - with the 30s journal sync it survives:
 ```sh
 journalctl -b -1 -p warning --no-pager | tail -40
 ```
+
+## Total freeze under memory pressure
+
+**Symptom:** everything stops at once. The pointer does not move, the keyboard
+does nothing, **Caps Lock does not toggle its LED**, and the fan spins up to
+full and stays there. The only way out is holding the power button. Afterwards
+the journal for that boot just *ends* - no error, no warning, no shutdown.
+
+**That empty journal is the diagnosis, not a gap in it.** Every failure that
+logs something had already been ruled out on this machine:
+
+| suspect | what you would see | what was there |
+| --- | --- | --- |
+| kernel OOM killer | `Out of memory: Killed process …` | nothing in that boot |
+| GPU hang | `i915 … GPU HANG` / `drm … reset` | nothing |
+| storage | `nvme … I/O error`, controller reset | nothing |
+| CPU/RAM fault | `mce`, `Hardware Error` | nothing |
+| soft lockup | `watchdog: BUG: soft lockup` | nothing |
+| thermal | `critical temperature`, throttling | nothing |
+
+**One row of that table does not do the work it looks like it does**, which
+only became clear later. The GPU row catches a driver that *recovers* and says
+so; a driver that hard-locks the box mid-transaction logs nothing either, so
+"nothing" there is not an alibi. What actually separates the two is how much
+memory was left: this freeze had none, and the one in
+[Freeze with memory to spare](#freeze-with-memory-to-spare) had 68% free with
+swap untouched. Check that first - `earlyoom`'s per-minute report now puts it
+in the journal for you - and Caps Lock second.
+
+**Cause:** memory-pressure livelock. The kernel is not crashed - it is *busy*.
+When the last of RAM and swap goes, reclaim does not fail cleanly; it keeps
+almost succeeding. It scans page lists, writes anonymous pages out to swap, and
+faults them straight back in because they were still being used. Every process
+that wants a page - including the ones drawing your screen and reading your
+keyboard - blocks in **direct reclaim**, on its own thread, waiting for memory
+that is not coming. The kernel's OOM killer only fires once reclaim has
+genuinely failed, and in this state it never quite does, so the machine can
+grind like this for many minutes without ever being rescued.
+
+The fan is the tell that it is a livelock rather than a panic: a panicked
+kernel stops driving anything, while this one is running every core flat out.
+And Caps Lock is the tell that it is not merely X that died - setting that LED
+is a work item on a queue that no longer gets scheduled, so a dead Caps Lock
+means the kernel itself is starved, not just the session.
+
+On 8GB this is a browser-and-Electron problem, and it had been coming for a
+while: the OOM killer had already fired fourteen times in the ten days before
+the freeze, on `Isolated Web Co` (a Chromium content process), `electron` and
+`java`. Those were the times it worked. The freeze is the time it did not.
+
+**Fix:** `do_memory()` in `postinstall.sh`, which is two separate things.
+
+*Reclaim earlier*, in `/etc/sysctl.d/99-memory-pressure.conf`:
+
+```sh
+vm.watermark_scale_factor = 125   # was 10
+vm.watermark_boost_factor = 0     # was 15000
+```
+
+`watermark_scale_factor` is how much headroom `kswapd` keeps, in tenths of a
+percent. The default 10 means 1% - on 8GB, `kswapd` wakes with about 80MB left
+and stops again as soon as it recovers a little, and anything allocating faster
+than that empties the gap between wakeups and lands in direct reclaim. 125 lets
+`kswapd` work an order of magnitude further ahead, in the background, where a
+stall costs nothing visible. `watermark_boost_factor` is a different mechanism
+that reclaims hard to keep large contiguous pages available; on a desktop that
+is mostly anonymous memory it fires during the moments that are already tight
+and turns them into swap storms. Neither setting caps memory use - they only
+change *when* reclaim starts.
+
+*And a killer that arrives on time* - `earlyoom`, which watches free memory and
+free swap from userspace on a timer and kills something before the kernel can
+reach that state at all. It is configured in a drop-in at
+`/etc/systemd/system/earlyoom.service.d/10-thresholds.conf`:
+
+- `-m 10,5 -s 10,5` - warn at 10% free, kill at 5%, and only when memory *and*
+  swap are both that low.
+- `--prefer` the browser and Electron comms. This matters more than it looks:
+  left alone `earlyoom` kills the largest resident process, and during a
+  Chromium session that is often `Xorg` holding the framebuffers - which takes
+  the whole desktop and every unsaved window with it. Trading one tab is the
+  entire point.
+- `--avoid` `Xorg`, `i3`, `kitty`, `polybar`, `picom`, the systemd and D-Bus
+  processes, pipewire. Never the session, never the terminal you would use to
+  fix it.
+- `-r 60` writes a memory report to the journal every minute. Together with the
+  30s journal sync from the step above, that is what makes a *next* time
+  legible: the last line before a forced poweroff says how much was left.
+
+Note that the process names are matched against `comm`, which the kernel
+truncates to 15 characters - that is why the pattern says `Isolated Web Co` and
+not `Isolated Web Content`. If you add a program, check what it actually calls
+itself:
+
+```sh
+ps -eo comm,rss --sort=-rss | head
+```
+
+**Confirm it is working:**
+
+```sh
+systemctl status earlyoom              # active, and the argv it was given
+sysctl vm.watermark_scale_factor       # 125
+journalctl -u earlyoom -n 5            # the per-minute memory reports
+```
+
+`earlyoom` also has a `--dryrun` mode if you want to watch what it *would*
+kill before trusting it with the real thing.
+
+**This does not add memory.** It changes running out from a hang into a
+notification that something died. If it starts killing things you wanted, the
+answer is fewer Chromium tabs, or more RAM, or `zram` - which
+[`archsetup.py`](../installer/archsetup.py) offers as a swap option at install
+time, and which this machine did not take (it has a 6GB swap partition with
+`zswap` in front of it instead). Adding `zram` on top of an existing `zswap`
+setup means disabling `zswap` first - the two do the same job in different
+places and stacking them just compresses everything twice.
+
+## Freeze with memory to spare
+
+**Symptom:** the machine dies mid-use exactly like the freeze above - pointer
+gone, keyboard gone, power button the only way out, and a journal for that boot
+that just ends mid-second. The difference is in the last line before it ends:
+
+```
+20:14:53  earlyoom: mem avail: 4209 of 6163 MiB (68.29%), swap free: 100.00%
+20:15:09  systemd: Started app-org.chromium.Chromium-32721.scope
+          <journal ends>
+```
+
+**68% of RAM available and swap completely untouched, sixteen seconds before
+the machine went.** Nothing was short of anything, so none of the memory work
+in the section above applies. Three boots in five days ended this way.
+
+**Telling the two apart mid-hang:** hold Caps Lock.
+
+| | Caps Lock LED | What it is |
+|---|---|---|
+| dead | kernel cannot run the work item that sets it | [memory livelock](#total-freeze-under-memory-pressure) |
+| toggles | kernel is fine, the display went | this, or [PSR](#black-screen-at-idle) if it happened at idle |
+
+**Cause on this hardware:** a GeForce MX330 on `nouveau` that nothing used.
+The panel is wired to the Intel iGPU; the NVIDIA part is a class `0302` *3D
+controller*, which means a GPU with no display outputs at all. No proprietary
+driver was installed either, so nothing could offload to it. All it did was
+runtime-suspend and resume under a driver with no reclocking firmware:
+
+```
+nouveau 0000:01:00.0: pmu: firmware unavailable
+```
+
+which is a well-known hard lock on Pascal. Xorg had even auto-attached it as a
+secondary GPU screen and `mmap`'d it, for no benefit whatsoever:
+
+```
+[5.641] (II) modeset(0):  using drv /dev/dri/card1    <- Intel, the actual display
+[5.642] (II) modeset(G0): using drv /dev/dri/card0    <- nouveau, along for the ride
+```
+
+**Fix:** ban the driver rather than tune it. `do_gpu()` writes
+`/etc/modprobe.d/blacklist-nouveau.conf`, rebuilds the initramfs, and adds
+`modprobe.blacklist=nouveau` to the GRUB command line as a backstop. The
+`install nouveau /bin/false` line matters as much as the `blacklist` one -
+`blacklist` alone only stops autoload by modalias, and an explicit `modprobe`
+or a dependency pull still brings the module in.
+
+**The second half is easy to miss and inverts the result.** With no driver
+bound, the PCI core calls `pm_runtime_forbid()` on the device, so
+`power/control` defaults to `on` and the card sits *awake and idle* - worse for
+battery than leaving `nouveau` to suspend it. The udev rule sets it back to
+`auto`, which lets the PCI core drop the card and its parent PCIe port into
+D3cold, the state where the slot actually loses power.
+
+**Confirm it is working**, a minute or two after boot:
+
+```sh
+lsmod | grep nouveau                                   # nothing
+lspci -nnk -s 01:00.0 | grep -i 'driver in use'        # nothing
+ls /sys/class/drm/ | grep card                         # card1 only, no card0
+cat /sys/bus/pci/devices/0000:01:00.0/power_state      # D3cold
+```
+
+That last one reads `D0` for the first minute after boot, before the PCIe
+port's autosuspend delay elapses. Measuring too early looks exactly like a
+failure and is not one.
+
+**The card still appears in `lspci` and in fastfetch.** It is soldered to the
+board; blacklisting a driver does not unsolder it. Those tools enumerate the
+PCI bus, not what the kernel is using - the `driver in use` line is the one
+that answers that question.
+
+**This diagnosis is provisional.** It is circumstantial - three freezes with
+memory free, an empty journal, and a known-bad driver on a card serving no
+purpose - and the suspect is removed rather than convicted. It takes a few
+weeks without a hard cut to call it. If one happens anyway, check Caps Lock,
+then read the tail of the previous boot:
+
+```sh
+journalctl -b -1 --no-pager | tail -40
+```
+
+**If you want the card back**, remove
+`/etc/modprobe.d/blacklist-nouveau.conf` and the
+`modprobe.blacklist=nouveau` fragment from `/etc/default/grub`, then
+`sudo mkinitcpio -P && sudo grub-mkconfig -o /boot/grub/grub.cfg`. The better
+answer is the proprietary `nvidia` package, which handles Optimus power
+management properly - `do_gpu()` detects it and stands down.
 
 ## neovim
 
@@ -859,9 +1288,54 @@ already running: two ways to join a network, one of them a reimplementation of
 the other. The tray is the one that comes with NetworkManager and handles the
 cases a menu should not try to, so it is the one that stayed.
 
-The example modules in `modules.ini` use `interface-type = wireless|wired`
-rather than an interface name - `interface = wlp2s0` works on exactly one
-machine.
+### The speed meter follows the route, not the interface
+
+The bar shows one live up/down readout, from
+[`netspeed.sh`](../dotfiles/.config/i3/script/netspeed.sh).
+
+It used to be two: `[module/wired-network]` and `[module/wireless-network]`,
+side by side, each hiding itself when its interface type was not connected. The
+reasoning was that a laptop is on a dongle or on wifi but never both, so exactly
+one would ever be visible. **That is false, and it showed as two speed meters on
+the bar** - a phone tethered over USB while wifi is still associated brings up
+both interfaces at once:
+
+```
+$ ip route show default
+default via 10.138.253.74 dev enp0s20f0u1  metric 100   <- carries the traffic
+default via 192.168.1.1   dev wlp2s0       metric 600   <- up, unused
+```
+
+Both modules render, and only one of them is counting anything.
+
+No configuration fixes that. `internal/network` selects by interface *type*;
+neither module can know the other exists, let alone which one owns the default
+route. And that is the question a speed meter is really being asked - "which
+link am I actually using" - which interface type was never able to answer.
+
+So there is one module, and it asks the kernel:
+
+```
+$ netspeed.sh iface
+enp0s20f0u1
+  chosen by: ip route get (the kernel's own choice)
+```
+
+`ip route get` rather than comparing metrics by hand, because it accounts for
+policy rules, VPN tables and everything else that decides where a packet really
+goes - all of which a metric comparison here would have to reimplement and would
+eventually get wrong. Two links up stops being a special case: it is a routing
+table with a winner. Unplug the tether and the meter follows wifi on the next
+tick, with no restart.
+
+Still no interface name anywhere. `interface = wlp2s0` works on exactly one
+machine, which is why the old modules used `interface-type` and why this one
+uses the route.
+
+It is `tail = true` with the script's own one-second loop rather than
+`interval = 1`, because a rate is a difference between two samples and the
+reader has to hold the previous one. polybar re-execing the script every second
+would hand it a fresh process with nothing to subtract from.
 
 ## The system tray
 
