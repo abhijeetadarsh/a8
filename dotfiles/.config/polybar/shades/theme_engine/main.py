@@ -203,6 +203,7 @@ def build_targets(cache, cfg, home):
         ("json",       writers.json_dump,  f"{cache}/colors.json",         None),
         ("nvim",       writers.nvim,       f"{cache}/nvim.lua",            None),
         ("starship",   writers.starship,   f"{cache}/starship.toml",       None),
+        ("tmux",       writers.tmux,       f"{cache}/tmux.conf",           None),
         ("xresources", writers.xresources, f"{cache}/colors.Xresources",   None),
         # include-a-sibling consumers - written next to the program's config
         ("polybar",  writers.polybar, f"{cfg}/polybar/shades/color/out.ini",   f"{cfg}/polybar/shades"),

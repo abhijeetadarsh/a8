@@ -27,3 +27,7 @@ dotfiles/.config/kitty/current-theme.conf
 dotfiles/.config/dunst/dunstrc.d/
 dotfiles/.config/gtk-3.0/gtk.css
 dotfiles/.config/gtk-4.0/gtk.css
+
+# tpm clones plugins beside tmux.conf. With stow --no-folding that directory
+# is in $HOME, not here - but a stow without it would fold it into this tree.
+dotfiles/.config/tmux/plugins/

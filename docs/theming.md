@@ -50,6 +50,7 @@ other mode there would mean a reboot silently threw away your wallpaper.
        ├── ~/.cache/theme/colors.Xresources  xrdb
        ├── ~/.cache/theme/nvim.lua           neovim colourscheme
        ├── ~/.cache/theme/starship.toml      the prompt
+       ├── ~/.cache/theme/tmux.conf          tmux's bar and pane borders
        ├── ~/.config/i3/colors.conf          client.* + $accent
        ├── ~/.config/polybar/.../color/out.ini    the bar
        ├── ~/.config/polybar/.../color/out.rasi   the bar's rofi menus
@@ -68,8 +69,9 @@ other mode there would mean a reboot silently threw away your wallpaper.
 ```
 
 `theme_init.sh` runs the generator and then reloads everything that can be
-reloaded without a logout: `xrdb`, `SIGUSR1` to kitty, `dunstctl reload`, a GTK
-theme-name toggle, a polybar relaunch and `i3-msg reload`. It then says which
+reloaded without a logout: `xrdb`, `SIGUSR1` to kitty, `tmux source-file` of
+the colour file, `dunstctl reload`, a GTK theme-name toggle, a polybar relaunch
+and `i3-msg reload`. It then says which
 wallpaper you got, as a notification with the image itself as its icon - see
 [Notifications](postinstall.md#notifications).
 

@@ -100,6 +100,11 @@ Re-running it is the supported way to fix a half-finished install.
     [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
     deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
     built by this script rather than by whenever you first happen to open nvim.
+16. **tmux plugins** - clones every `@plugin` in
+    [`tmux.conf`](../dotfiles/.config/tmux/tmux.conf) into
+    `~/.config/tmux/plugins/`, exactly where tpm's `prefix+I` would put them,
+    then loads the config on a throwaway server to prove it takes. See
+    [tmux](#tmux).
 
 ## Removable drives
 
@@ -533,6 +538,122 @@ for them - `brightness.sh up --notify` raises the screen the pointer is on and
 draws the same tagged dunst popup the volume keys use - but which screen a
 *key* should move is a genuinely different question from which one a scroll
 should, and it has not been answered here yet.
+
+## The mouse, off and on
+
+`$mod+m` switches the pointer off: every pointer device X has - touchpad,
+mouse - stops moving the cursor and stops clicking, and the cursor is taken off
+the screen. A palm landing on the touchpad mid-sentence cannot move focus,
+follow a link, or drop the window into another workspace, and there is no arrow
+parked in the middle of what you are reading. The same key switches it back on,
+and `$mod+Ctrl+m` switches it on unconditionally.
+
+It is [`.config/i3/script/mouse.sh`](../dotfiles/.config/i3/script/mouse.sh),
+and the `mouse` package group is the two things it needs: `xorg-xinput` for the
+devices and `unclutter` for the cursor.
+
+### Why two halves
+
+Neither implies the other, and either alone is worse than useless. Disabling
+the devices leaves the arrow drawn wherever it was abandoned. Hiding the cursor
+leaves the input live, and a click you cannot see coming is worse than one you
+can. So the key does both, and `on` undoes both.
+
+The cursor half needs a *process*, not a command. `XFixesHideCursor` is undone
+the moment the client that asked for it disconnects, so there is no "hide the
+cursor and exit" - something has to stay connected for as long as the cursor is
+to stay hidden. That is what `unclutter` is doing here, started with
+`--start-hidden` (hide now, this is a key press and not an idle timer) and
+`--timeout 0` (re-hide the instant the pointer stops - not dead weight even
+with the devices off, because i3 warping the pointer to another output *is*
+movement and would otherwise leave the arrow back on screen).
+
+If `unclutter` is missing the input half still happens and the notification
+says the cursor stayed. Refusing to disable the touchpad because an arrow is
+still visible would be the wrong trade.
+
+### A disabled device disappears from `xinput list`
+
+This is the trap, and it is the one that turns a convenience key into a
+keyboard-only session.
+
+`xinput disable` does not just clear a flag. It *detaches the device from its
+master*: it stops being
+
+```
+⎜   ↳ DELL09E9:00 04F3:3147 Touchpad    id=9    [slave  pointer  (2)]
+```
+
+under the Virtual core pointer, and reappears at the very bottom of the list,
+under a different glyph, as
+
+```
+∼ DELL09E9:00 04F3:3147 Touchpad        id=9    [floating slave]
+```
+
+Nothing in that line says it is a pointer any more. So a script that finds its
+devices by matching `[slave  pointer]` - the obvious way, and the way this one
+was first written - can see them all right up until the moment it disables
+them, and never again. `mouse.sh status` answers "no pointer on this machine",
+and `toggle` refuses to switch a mouse back on that it can no longer find. The
+failure lands exactly when you need the key to work and have no pointer left to
+work around it with.
+
+`mouse.sh` matches both brackets. A floating slave is ambiguous - a floated
+*keyboard* looks identical in the list - so those get one extra question:
+`xinput list <id>` reports `XIButtonClass` for anything with buttons, which is
+every pointer and no keyboard.
+
+### Two devices it deliberately leaves alone
+
+**The master pointer.** X has no switch for it, and it is the thing the arrow
+belongs to.
+
+**`Virtual core XTEST pointer`.** This is how *programs* move the pointer.
+[`screenshot.sh`](../dotfiles/.config/i3/script/screenshot.sh) asks xdotool
+where the pointer is to decide which monitor to capture, and i3's own
+`mouse_warping` puts the cursor on an output when focus moves there. Disabling
+XTEST breaks both and stops no hardware, because it has no buttons of its own.
+
+And one that catches the eye the other way: on this laptop the USB mouse
+registers **twice**, once as a keyboard and once - for its extra buttons - as a
+slave pointer named `HID 1bcf:08a0 Keyboard`. A device list filtered by name
+would leave half the mouse live, which looks exactly like the script not
+working. The type always comes from what X calls the device, never from what it
+is called.
+
+### The background process must not hold the lock
+
+`mouse.sh` takes a `flock` so two fast presses cannot interleave. The lock is
+fd 9, and `unclutter` is started as a background child - which inherits every
+open descriptor, fd 9 among them.
+
+Left that way, unclutter holds the lock for exactly as long as the cursor is
+hidden, so the *next* run blocks on `flock` forever: `$mod+m` does nothing,
+`$mod+Ctrl+m` does nothing, and the pointer stays off with no way back short of
+a terminal. The one process that must not hold this lock is the only one that
+exists while the pointer is off. It is started with `9>&-`, and the lock is
+taken with `flock -w 2` so that even a lock somebody else is holding cannot
+wedge the key that gives the pointer back.
+
+### Getting the pointer back
+
+Four ways, in the order you would reach for them:
+
+- **`$mod+m`** again.
+- **`$mod+Ctrl+m`**, which is `on` unconditionally - the one to hit when you
+  are not sure which state you are in, the same idea as `$mod+Shift+b` for a
+  blanked screen. It is a second key rather than a second press because the
+  thing you would check the state with is the thing that is off.
+- **Plug a USB mouse in.** X enables a newly arrived device, so it simply
+  works. Toggling back on afterwards leaves it alone: it is not on the list of
+  things that were switched off.
+- **`mouse.sh on`** from a terminal. With no state file at all it enables every
+  pointer that is off, because a pointer that will not come back is a far worse
+  failure than re-enabling one somebody had switched off on purpose.
+
+`mouse.sh list` prints every pointer X has and whether it is on, which is the
+first thing to look at if any of the above does not do what it should.
 
 ## What the keys do
 
@@ -1050,6 +1171,42 @@ machines on the same commits.
 `nvim-treesitter` is pinned to its `master` branch on purpose. Upstream's
 default branch is now `main`, a rewrite with a different API, and following it
 would leave every buffer unhighlighted.
+
+## tmux
+
+The prefix is `C-Space`. `hjkl` move between panes, `HJKL` resize (repeatable),
+`r` reloads the config. Copy mode uses vi keys: `v`, `V` and `C-v` select the
+way vim's visual modes do, `y` yanks. The yank reaches the system clipboard
+without any helper: tmux forwards it to kitty as an OSC 52 sequence, which
+kitty's terminfo advertises (`Ms`) and its default `clipboard_control` accepts.
+
+Plugins are managed by [tpm](https://github.com/tmux-plugins/tpm) and live in
+`~/.config/tmux/plugins/` - beside the config, and outside this repo, because
+stow's `--no-folding` makes `~/.config/tmux` a real directory with only
+`tmux.conf` linked into it. The config pins that path explicitly
+(`TMUX_PLUGIN_MANAGER_PATH`), since tpm otherwise guesses it from where it
+found the config.
+
+There is no lockfile to pin against, so `postinstall.sh` does what `prefix+I`
+does: parses the `@plugin` lines and clones each one, leaving any existing
+clone alone. It deliberately does not call tpm's own `bin/install_plugins` -
+that script talks to whichever tmux server `tmux` resolves to, and run from
+inside a session it would read that server's stale plugin path and source the
+config into it. Updating is `prefix+U`, from inside tmux.
+
+The status line is neovim's. lualine's `auto` theme derives its sections from
+the wallpaper colourscheme - an accent block at each end, a base-coloured block
+inside it, the `StatusLine` colour for the bar itself, powerline arrows between
+them - and `tmux.conf` lays out the same shape at the bottom of the screen:
+session on the left, windows across the middle, host and clock on the right.
+
+None of the colours in that file are literal. They are `#{@thm_*}` options,
+and `~/.cache/theme/tmux.conf` - written by the theme engine like every other
+program's colours, see [theming.md](theming.md) - sets the real values. tmux
+expands formats inside style options, so `theme_init.sh` recolours a running
+server by sourcing that one file into it; nothing restarts. Before the first
+wallpaper the options hold plain ANSI names (`blue`, `black`, `white`), so a
+tmux started on the console still has a readable bar.
 
 ## Screen tearing
 

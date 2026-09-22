@@ -169,6 +169,31 @@ bindsym $mod+b exec --no-startup-id $HOME/.config/i3/script/brightness.sh toggle
 #: bring every blanked screen back
 bindsym $mod+Shift+b exec --no-startup-id $HOME/.config/i3/script/brightness.sh wake --notify
 
+#:: Mouse
+# The pointer, off and on.
+#
+# Off disables every pointer device X has - touchpad, mouse - and takes the
+# cursor off the screen with it. A palm landing on the touchpad mid-sentence
+# cannot move focus, follow a link or drop the window somewhere else, and
+# there is no arrow parked in the middle of what you are reading.
+#
+# One key for both halves because either alone is useless: an invisible
+# pointer still clicks, and a disabled one still leaves an arrow on screen.
+#
+# $mod+Ctrl+m is `on` unconditionally, for when you cannot remember which
+# state you are in - the same idea as $mod+Shift+b for a blanked screen. It is
+# a second key rather than a second press because the thing you would check
+# with is the thing that is off. Both are keyboard-only on purpose.
+#
+# script/mouse.sh has the rest: which devices it leaves alone (the XTEST
+# pointer stays, or xdotool and i3's own mouse_warping stop working), why the
+# hidden cursor needs unclutter running, and how it decides what to switch
+# back on.
+#: turn the mouse and touchpad off, or back on
+bindsym $mod+m exec --no-startup-id $HOME/.config/i3/script/mouse.sh toggle
+#: turn the mouse back on, whatever state it is in
+bindsym $mod+Ctrl+m exec --no-startup-id $HOME/.config/i3/script/mouse.sh on
+
 # Use Mouse+$mod to drag floating windows to their wanted position
 floating_modifier $mod
 
@@ -492,6 +517,10 @@ bindsym Ctrl+Shift+Print       exec --no-startup-id $HOME/.config/i3/script/scre
 #:: Desktop
 #: lock the screen
 bindsym $mod+Ctrl+l exec --no-startup-id $HOME/.config/i3/script/i3lock-color.sh
+
+
+# Key swap
+exec --no-startup-id setxkbmap -option ctrl:swapcaps
 
 # i3-gaps
 gaps inner 1

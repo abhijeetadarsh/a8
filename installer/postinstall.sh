@@ -151,6 +151,7 @@ PKGS_SHOT=( maim xdotool xclip )
 # --- terminals, shell, editor ----------------------------------------------
 PKGS_TOOLS=(
     kitty                 # $mod+Return, and what ranger's image previews target
+    tmux                  # .config/tmux/tmux.conf; plugins cloned by do_tmux below
     starship eza          # .bashrc: prompt + `ls` alias
     neovim
     ranger                # $mod+n
@@ -288,6 +289,26 @@ PKGS_MEM=( earlyoom )
 # See .config/i3/script/brightness.sh and do_brightness below.
 PKGS_BRIGHTNESS=( brightnessctl ddcutil )
 
+# --- the mouse off switch ---------------------------------------------------
+# $mod+m disables every pointer device and hides the cursor, so a palm on the
+# touchpad cannot click or move focus while you type. Two packages, because the
+# two halves of "off" are unrelated:
+#
+# xorg-xinput - the input half. `xinput disable <id>` is the only way to switch
+#   a single pointer off at runtime; the alternatives are a libinput config
+#   snippet in /etc/X11 (needs root and an X restart, so useless for a key) or
+#   unplugging it. Without this the keybinding cannot work at all.
+#
+# unclutter - the cursor half, and it has to be a running process rather than a
+#   command: X undoes a cursor hide as soon as the client that asked for it
+#   disconnects. Arch's package is unclutter-xfixes, which hides through the
+#   XFixes extension instead of parking a fake window under the pointer.
+#   Missing it costs only the arrow on screen - the devices still go off, and
+#   the notification says so.
+#
+# See .config/i3/script/mouse.sh, which explains which devices it leaves alone.
+PKGS_MOUSE=( xorg-xinput unclutter )
+
 # --- AUR --------------------------------------------------------------------
 # Built with makepkg directly - see the AUR section below for why there is no
 # helper. jump-bin rather than jump: it ships a prebuilt binary, so this needs
@@ -314,6 +335,7 @@ PKG_GROUPS=(
     "theming|${PKGS_THEME[*]}"
     "memory|${PKGS_MEM[*]}"
     "brightness|${PKGS_BRIGHTNESS[*]}"
+    "mouse|${PKGS_MOUSE[*]}"
     "AUR|${AUR_PKGS[*]}"
 )
 
@@ -1795,6 +1817,95 @@ do_neovim() {
     fi
 }
 
+do_tmux() {
+    step "tmux plugins"
+
+    if ! command -v tmux >/dev/null; then
+        bad "tmux is not installed - skipping (re-run after installing it)"
+        return 1
+    fi
+
+    local conf="$HOME/.config/tmux/tmux.conf"
+    local plugins="$HOME/.config/tmux/plugins"
+
+    if [[ ! -f "$conf" ]]; then
+        bad "$conf is missing - the dotfiles step must run first"
+        return 1
+    fi
+
+    # tmux has no lockfile. What tpm does on prefix+I is clone every `@plugin`
+    # line from the config into $plugins - so do exactly that here, and tpm
+    # finds them already in place. Cloning them ourselves rather than calling
+    # tpm's bin/install_plugins keeps this step off the tmux server: that
+    # script talks to whichever server `tmux` resolves to, and run from inside
+    # an existing session it reads that server's (stale) plugin path and
+    # sources the config into it behind your back.
+    #
+    # "owner/repo" comes from GitHub; "owner/repo#ref" checks out that branch
+    # or tag. The clone lands in $plugins/repo, which is tpm's own naming.
+    # Existing clones are left alone - prefix+U is how they get updated.
+    mkdir -p "$plugins"
+    local spec name ref dir url cloned=0 rc=0
+    while IFS= read -r spec; do
+        [[ -z "$spec" ]] && continue
+        ref="${spec#*#}"; [[ "$ref" == "$spec" ]] && ref=""
+        spec="${spec%%#*}"
+        name="${spec##*/}"
+        dir="$plugins/$name"
+
+        [[ -d "$dir" ]] && continue
+
+        case "$spec" in
+            git@*|*://*) url="$spec" ;;
+            *)           url="https://github.com/$spec" ;;
+        esac
+
+        if git clone --depth 1 -q ${ref:+--branch "$ref"} "$url" "$dir" >/dev/null 2>&1; then
+            cloned=$((cloned + 1))
+        else
+            bad "could not clone $spec"
+            rm -rf "$dir"
+            rc=1
+        fi
+    done < <(awk '/^[[:space:]]*set(-option)?[[:space:]]+-g[[:space:]]+@plugin[[:space:]]/ {
+                      v = $0
+                      sub(/.*@plugin[[:space:]]+/, "", v)
+                      gsub(/["'"'"']/, "", v)
+                      sub(/[[:space:]].*/, "", v)
+                      print v
+                  }' "$conf")
+    (( cloned > 0 )) && note "cloned $cloned plugin(s) into $plugins"
+
+    if [[ ! -x "$plugins/tpm/tpm" ]]; then
+        bad "tpm is not in $plugins - the config's last line will fail with 127"
+        return 1
+    fi
+
+    # Load the config on a throwaway server and see whether it takes. A bad
+    # line in tmux.conf is not silent - tmux prints it into the first window -
+    # but the first window is a bad time to learn about it, and this runs the
+    # plugins' own scripts too, so a broken clone shows up here rather than
+    # as a bare status line. source-file reports errors to the client, which
+    # a server started with the config does not; hence the empty -f.
+    #
+    # -L puts it on its own socket: it never touches a server you are using.
+    local sock="postinstall-$$" err line
+    tmux -L "$sock" kill-server >/dev/null 2>&1
+    if ! tmux -L "$sock" -f /dev/null new-session -d -x 80 -y 24 >/dev/null 2>&1; then
+        warn "could not start a tmux server to check the config"
+        return "$rc"
+    fi
+    if err="$(tmux -L "$sock" source-file "$conf" 2>&1)"; then
+        ok "tmux.conf loads - plugins: $(ls "$plugins" | tr '\n' ' ')"
+    else
+        bad "tmux.conf does not load:"
+        while IFS= read -r line; do note "$line"; done <<< "$err"
+        rc=1
+    fi
+    tmux -L "$sock" kill-server >/dev/null 2>&1
+    return "$rc"
+}
+
 XINITRC_TAG="# written by postinstall.sh - \`startx\` reads this"
 XPROFILE_TAG="# written by postinstall.sh - both startx and lightdm read this"
 
@@ -2109,6 +2220,7 @@ do_xinitrc   || FAILURES=$((FAILURES + 1))
 do_lightdm   || FAILURES=$((FAILURES + 1))
 do_theme     || FAILURES=$((FAILURES + 1))
 do_neovim    || FAILURES=$((FAILURES + 1))
+do_tmux      || FAILURES=$((FAILURES + 1))
 
 mkdir -p "$STATE_DIR"
 date '+%Y-%m-%d %H:%M' > "$LAST_RUN"
@@ -2141,6 +2253,7 @@ say "    ${D}${N}              Shift to drag a region, \$mod for the focused win
 say "    ${D}${N}              \$mod+Shift for just the monitor you are on"
 say "    ${D}--repair${N}      re-run with this to pick packages to reinstall"
 say "    ${D}neovim${N}        treesitter highlighting only - no LSP, plugins pinned by lazy-lock.json"
+say "    ${D}tmux${N}          prefix is C-Space; plugins are cloned already, prefix+U updates them"
 say "    ${D}usb drives${N}    mount themselves at /run/media/$USER - eject from the tray icon"
 say "    ${D}dotfiles${N}      edit them in $REPO/dotfiles, changes apply immediately"
 blank

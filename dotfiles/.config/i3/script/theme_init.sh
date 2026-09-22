@@ -206,6 +206,13 @@ fi
 # kitty re-reads its config on SIGUSR1, so open terminals recolour in place.
 pkill -USR1 -x kitty 2>/dev/null
 
+# tmux's bar and borders take their colours from #{@thm_*} options, and the
+# generated file is nothing but those. Sourcing it into the running server
+# resets them, and every window redraws. No server running is not an error.
+if command -v tmux >/dev/null && [[ -f "$CACHE/tmux.conf" ]]; then
+    tmux source-file "$CACHE/tmux.conf" 2>/dev/null
+fi
+
 # dunst, whose 99-theme.conf drop-in has just been rewritten.
 #
 # `dunstctl reload` re-reads the config of the running daemon. Restarting it

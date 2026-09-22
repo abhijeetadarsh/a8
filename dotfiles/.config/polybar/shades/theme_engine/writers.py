@@ -58,6 +58,25 @@ def json_dump(p, path):
     return _write(path, json.dumps(p, indent=2, sort_keys=True) + "\n")
 
 
+def tmux(p, path):
+    """Colour values only, as #{@thm_*} options.
+
+    The status line's layout lives in tmux.conf and refers to these by name.
+    tmux expands formats inside style options, so re-sourcing this file into
+    a running server recolours its bar and borders in place - no restart, and
+    no layout duplicated between the config and the generator. The names
+    mirror what lualine's "auto" theme reads from the nvim colourscheme, so
+    the two status lines come out the same.
+    """
+    keys = ("accent", "base", "surface0", "surface1", "text", "muted",
+            "selection", "warning")
+    lines = [f"# {HEADER}", ""]
+    for k in keys:
+        lines.append(f'set -g @thm_{k} "{p[k]}"')
+    lines.append("")
+    return _write(path, "\n".join(lines))
+
+
 def nvim(p, path):
     """A complete small colorscheme, loaded with dofile().
 
