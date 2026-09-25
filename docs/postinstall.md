@@ -100,6 +100,11 @@ Re-running it is the supported way to fix a half-finished install.
     [`lazy-lock.json`](../dotfiles/.config/nvim/lazy-lock.json) headlessly, and
     deletes clones that are no longer in `lua/plugins/`, so the plugin tree is
     built by this script rather than by whenever you first happen to open nvim.
+    Also installs, via mason, every language server that
+    [`lua/lang/*.lua`](../dotfiles/.config/nvim/lua/lang) asks for - mason only
+    auto-installs those when a UI is attached, so a headless run like this one
+    would otherwise leave them all missing until the first Go or C file was
+    opened by hand. See [neovim](#neovim).
 16. **tmux plugins** - clones every `@plugin` in
     [`tmux.conf`](../dotfiles/.config/tmux/tmux.conf) into
     `~/.config/tmux/plugins/`, exactly where tpm's `prefix+I` would put them,
@@ -1156,13 +1161,34 @@ management properly - `do_gpu()` detects it and stands down.
 
 ## neovim
 
-The config is deliberately small: **treesitter for syntax highlighting** and
-the wallpaper-derived colourscheme, plus telescope, nvim-tree, lualine, a
-splash screen and toggleterm. There is **no LSP** - no mason, no lspconfig, no
-none-ls, no completion engine - so nothing downloads language servers behind
-your back and there is nothing to configure per language.
+Treesitter for syntax highlighting and the wallpaper-derived colourscheme,
+telescope, nvim-tree, lualine, a splash screen, toggleterm - and an LSP stack
+(mason, mason-lspconfig, nvim-lspconfig, nvim-cmp) that is generic on purpose:
+`lua/plugins/lsp.lua` wires up mason/lspconfig/cmp with no language-specific
+code in it at all, and `lua/plugins/treesitter.lua` has no hardcoded parser
+list.
 
-Adding a plugin means dropping a file in
+Everything language-specific lives in one file per language under
+[`dotfiles/.config/nvim/lua/lang/`](../dotfiles/.config/nvim/lua/lang), each
+returning a plain table:
+
+```lua
+return {
+  treesitter = { "go", "gomod", "gowork", "gotmpl" },  -- parsers to install
+  lsp = { "gopls" },                                    -- mason package names
+  servers = {
+    gopls = { settings = { gopls = { gofumpt = true, staticcheck = true } } },
+  },
+  format_on_save = { "*.go" },
+}
+```
+
+`lsp.lua` and `treesitter.lua` both call `require("lang").load_all()`, which
+scans that directory, and aggregate across every file it finds. **Adding a language is one new file
+there; removing one is deleting it** - nothing else references it by name, so
+there is no second place to update.
+
+Adding a plugin (as opposed to a language) means dropping a file in
 [`dotfiles/.config/nvim/lua/plugins/`](../dotfiles/.config/nvim/lua/plugins);
 removing one means deleting that file and re-running this script, which cleans
 the clone up. Commit `lazy-lock.json` after `:Lazy update` to keep other
@@ -1171,6 +1197,25 @@ machines on the same commits.
 `nvim-treesitter` is pinned to its `master` branch on purpose. Upstream's
 default branch is now `main`, a rewrite with a different API, and following it
 would leave every buffer unhighlighted.
+
+### Language servers install themselves, but only with a UI attached
+
+`mason-lspconfig`'s `ensure_installed` (in `lsp.lua`) auto-installs any server
+a `lua/lang/*.lua` file asks for - deliberately only when a UI is attached, so
+a headless run (CI, or this script) never triggers a background download
+nobody asked for. In normal interactive use that means opening the first file
+of a language you have not used before installs its server in the background,
+with a `[mason-lspconfig.nvim] installing <server>` notification, and it
+attaches once the install finishes.
+
+Because of that guard, `do_neovim()` in `postinstall.sh` drives the same
+install itself for a fresh machine - see [step 15](#what-it-does-in-order). It
+does not use `:MasonInstall` directly: for a package the size of clangd's
+bundled clang distribution, that command returns long before the unpack is
+actually done, and nothing stops the script's `qa` from firing mid-install.
+Instead it calls `Package:install()` and waits on the returned handle's
+`"closed"` event, which is the only signal that means the package is actually
+usable.
 
 ## tmux
 

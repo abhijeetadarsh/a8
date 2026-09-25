@@ -154,6 +154,8 @@ PKGS_TOOLS=(
     tmux                  # .config/tmux/tmux.conf; plugins cloned by do_tmux below
     starship eza          # .bashrc: prompt + `ls` alias
     neovim
+    go                    # nvim's gopls (mason) is self-contained, but building and
+                          # running Go code needs the real toolchain
     ranger                # $mod+n
     python-pillow         # ranger image previews
     highlight atool       # ranger's scope.sh: syntax + archive previews
@@ -1779,42 +1781,105 @@ do_neovim() {
     fi
 
     local data="${XDG_DATA_HOME:-$HOME/.local/share}/nvim"
-
-    # This config is treesitter and a colourscheme - syntax highlighting, and
-    # nothing that needs a language server. Machines that ran an earlier
-    # version of this repo still have mason's servers on disk, and mason lives
-    # outside lazy's control: no lazy command will ever clean them up, so they
-    # would sit there being downloaded-but-unreachable forever.
-    if [[ -d "$data/mason" ]]; then
-        rm -rf "$data/mason" &&
-            note "removed mason's language servers - nothing uses them any more"
-    fi
+    local rc=0
 
     # Do on a fresh machine what would otherwise only happen the first time you
     # happened to open nvim, and undo drift on an existing one:
     #
     #   install  clone anything in lua/plugins that is not on disk yet
     #   restore  check every plugin out at the commit in lazy-lock.json
-    #   clean    delete clones that are no longer in the spec (the LSP stack)
+    #   clean    delete clones that are no longer in the spec
     #
     # All three are no-ops once the tree matches the lockfile, so re-running
     # this script costs nothing. Headless lazy runs its tasks synchronously,
     # which is the only reason a one-shot invocation like this works at all.
+    # Treesitter parsers come along for free here too: lua/plugins/treesitter.lua
+    # reads its ensure_installed list from lua/lang/*.lua, and nvim-treesitter's
+    # own installer blocks the same way lazy's does, even headless.
     if nvim --headless "+Lazy! install" "+Lazy! restore" "+Lazy! clean" +qa \
         >/dev/null 2>&1; then
-        ok "plugins match lazy-lock.json"
+        ok "plugins and treesitter parsers match lazy-lock.json / lua/lang/*.lua"
     else
         warn "headless plugin sync failed"
         note "not fatal - nvim bootstraps lazy.nvim itself on first launch"
         return 1
     fi
 
-    # Parsers are the actual highlighting, and they are built per machine
-    # rather than pinned, so a lockfile match does not prove they exist.
     if [[ ! -d "$data/lazy/nvim-treesitter" ]]; then
         warn "nvim-treesitter is missing - syntax highlighting will be off"
-        return 1
+        rc=1
     fi
+
+    # --- language servers -----------------------------------------------------
+    # Every dotfiles/.config/nvim/lua/lang/*.lua file can declare an `lsp` list
+    # of mason package names. lua/plugins/lsp.lua installs those automatically -
+    # but only when a UI is attached, deliberately, so a headless run never
+    # triggers a background download nobody asked for (see that file). That
+    # guard means a plain headless postinstall would otherwise leave every
+    # server missing until the first Go or C file was opened by hand. This does
+    # what that first file-open would have triggered, so a fresh machine has
+    # every server lua/lang asks for before nvim is ever opened.
+    #
+    # `:MasonInstall` on its own does not block long enough to rely on here -
+    # a package like clangd's clang distribution takes minutes to unpack, and
+    # nothing stops `qa` from firing while that is still running. So this
+    # drives mason's own Package:install() handle directly and waits on its
+    # "closed" event instead, which is the only signal that is actually done
+    # rather than merely started.
+    local sync_script missing
+    sync_script="$(mktemp --suffix=.lua)"
+    cat > "$sync_script" <<'LUA'
+local ok, lang = pcall(require, "lang")
+if not ok then
+  print("MISSING:lua/lang failed to load: " .. tostring(lang))
+  return
+end
+
+local servers = {}
+for _, l in ipairs(lang.load_all()) do
+  vim.list_extend(servers, l.lsp or {})
+end
+
+local mr = require("mason-registry")
+local pending = 0
+
+for _, name in ipairs(servers) do
+  local pok, pkg = pcall(mr.get_package, name)
+  if pok and not pkg:is_installed() and not pkg:is_installing() then
+    pending = pending + 1
+    pkg:install():once("closed", function()
+      pending = pending - 1
+    end)
+  end
+end
+
+-- 10 minutes: generous enough for a slow link on the largest server (clangd's
+-- bundled clang), while still ending the script if something is truly stuck.
+vim.wait(600000, function() return pending <= 0 end, 500)
+
+local missing = {}
+for _, name in ipairs(servers) do
+  local pok, pkg = pcall(mr.get_package, name)
+  if not pok or not pkg:is_installed() then
+    table.insert(missing, name)
+  end
+end
+print("MISSING:" .. table.concat(missing, ","))
+LUA
+
+    missing="$(nvim --headless -c "luafile $sync_script" -c "qa" 2>/dev/null | grep '^MISSING:' | tail -1)"
+    missing="${missing#MISSING:}"
+    rm -f "$sync_script"
+
+    if [[ -n "$missing" ]]; then
+        warn "language server(s) failed to install: $missing"
+        note "re-run this script, or open nvim and let mason finish in the background"
+        rc=1
+    else
+        ok "language servers match lua/lang/*.lua (mason)"
+    fi
+
+    return "$rc"
 }
 
 do_tmux() {
@@ -2252,7 +2317,7 @@ say "    ${D}Print${N}         screenshot to ~/Pictures/maim; add Ctrl for the c
 say "    ${D}${N}              Shift to drag a region, \$mod for the focused window,"
 say "    ${D}${N}              \$mod+Shift for just the monitor you are on"
 say "    ${D}--repair${N}      re-run with this to pick packages to reinstall"
-say "    ${D}neovim${N}        treesitter highlighting only - no LSP, plugins pinned by lazy-lock.json"
+say "    ${D}neovim${N}        LSP via mason, one file per language in lua/lang/ - see docs/postinstall.md"
 say "    ${D}tmux${N}          prefix is C-Space; plugins are cloned already, prefix+U updates them"
 say "    ${D}usb drives${N}    mount themselves at /run/media/$USER - eject from the tray icon"
 say "    ${D}dotfiles${N}      edit them in $REPO/dotfiles, changes apply immediately"

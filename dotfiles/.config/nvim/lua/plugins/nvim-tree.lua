@@ -17,9 +17,24 @@ return {
       },
       renderer = {
         group_empty = true,
+        icons = {
+          git_placement = "right_align",
+          glyphs = {
+            git = {
+              unstaged = "M",
+              staged = "A",
+              unmerged = "C",
+              renamed = "R",
+              untracked = "U",
+              deleted = "D",
+              ignored = "!",
+            },
+          },
+        },
       },
       filters = {
-        dotfiles = true,
+        dotfiles = false,
+        git_ignored = false,
       },
     }
 
