@@ -1,0 +1,23 @@
+# Vi keybindings for readline (bash, python's REPL, etc.) - .bashrc sets
+# `set -o vi` for bash itself; this is everything else that reads .inputrc.
+set editing-mode vi
+
+# A visible mode indicator in the prompt, since vi mode gives no other way to
+# tell insert from normal at a glance.
+set show-mode-in-prompt on
+
+# Plain ANSI fallback for before the first wallpaper, or any program that
+# reads .inputrc without sourcing ~/.cache/theme/colors.sh first (this file
+# cannot see shell variables - it is parsed by readline, not bash). Once a
+# theme exists, .bashrc overrides both strings with the palette's actual
+# accent/green as a coloured pill, to match nvim-tree's badges, i3's active
+# border and everything else that reads THEME_ACCENT. See docs/theming.md.
+set vi-cmd-mode-string \1\e[1;31m\2 NORMAL \1\e[0m\2
+set vi-ins-mode-string \1\e[1;32m\2 INSERT \1\e[0m\2
+
+# Bash's default (500ms) is a noticeable lag between pressing Esc and the
+# mode indicator actually flipping. This is how long readline waits to see
+# whether an Esc starts a longer escape sequence before treating it as a bare
+# Esc; vi mode has no multi-key Esc sequences to wait for, so shortening it is
+# free.
+set keyseq-timeout 20

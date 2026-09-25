@@ -10,6 +10,7 @@ alias ls='eza --icons=always'
 alias grep='grep --color=auto'
 alias cls='clear'
 alias claude='claude --dangerously-skip-permissions'
+alias reload='source ~/.bashrc'
 
 # The i3 keybindings, printed. The same script draws the searchable rofi list
 # on $mod+F1 - it prints here because stdout is a terminal. `keys shot` filters.
@@ -64,3 +65,29 @@ export ANDROID_SDK_ROOT="/home/a8/Android/Sdk"
 export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
 
 export PATH=/home/a8/bin:$PATH
+export PATH=$PATH:$HOME/go/bin
+export PATH=$PATH:/home/a8/Projects/boot.dev.workspace/worldbanc/private/bin
+
+set -o vi
+
+# Recolour .inputrc's vi-mode indicator from the generated palette, as a
+# filled pill in the same style as starship's username segment
+# (bg:accent fg:base) - so it reads as part of the same prompt rather than a
+# bolted-on red/green label. Only runs once colors.sh has actually been
+# sourced above; before the first wallpaper, .inputrc's plain ANSI fallback
+# stands.
+if [[ -n "${THEME_ACCENT:-}" ]]; then
+    _hex_to_rgb() {
+        local hex="${1#\#}"
+        printf '%d;%d;%d' "0x${hex:0:2}" "0x${hex:2:2}" "0x${hex:4:2}"
+    }
+    _vi_fg="$(_hex_to_rgb "$THEME_BASE")"
+    _vi_cmd_bg="$(_hex_to_rgb "$THEME_ACCENT")"
+    _vi_ins_bg="$(_hex_to_rgb "$THEME_GREEN")"
+
+    bind "set vi-cmd-mode-string $(printf '\001\e[1m\e[38;2;%sm\e[48;2;%sm\002 NORMAL \001\e[0m\002' "$_vi_fg" "$_vi_cmd_bg")"
+    bind "set vi-ins-mode-string $(printf '\001\e[1m\e[38;2;%sm\e[48;2;%sm\002 INSERT \001\e[0m\002' "$_vi_fg" "$_vi_ins_bg")"
+
+    unset -f _hex_to_rgb
+    unset _vi_fg _vi_cmd_bg _vi_ins_bg
+fi
